@@ -1,17 +1,21 @@
-#include <spdlog/spdlog.h>
-#include <spdlog/sinks/stdout_color_sinks.h>
+#include "core/VulLog.h"
 
 int main() {
 	// 彩色终端日志器
-	auto console = spdlog::stdout_color_mt("console");
+	Vulcanite::Log::Init();
 
-	console->info("hello vulcanite engine");
-	console->warn("this is a warning");
-	console->error("this is an error");
+	VULCANITE_CORE_TRACE("TRACE INFO {0},{1}", "testInfo Core", 0);
+	VULCANITE_CORE_INFO("INFO INFO {0},{1}", "testInfo Core", 1);
+	VULCANITE_CORE_WARN("INFO WRN {0},{1}", "testInfo Core", 2);
+	VULCANITE_CORE_ERROR("INFO ERROR {0},{1}", "testInfo Core", 3);
+	VULCANITE_CORE_CRITICAL("INFO CRITICAL {0},{1}", "testInfo Core", 4);
 
-	spdlog::set_pattern("[%H:%M:%S] [%^%l%$] %v");
+	VULCANITE_CLIENT_TRACE("TRACE INFO {0},{1}", "testInfo Client", 5);
+	VULCANITE_CLIENT_INFO("INFO INFO {0},{1}", "testInfo Client", 6);
+	VULCANITE_CLIENT_WARN("INFO WRN {0},{1}", "testInfo Client", 7);
+	VULCANITE_CLIENT_ERROR("INFO ERROR {0},{1}", "testInfo Client", 8);
+	VULCANITE_CLIENT_CRITICAL("INFO CRITICAL {0},{1}", "testInfo Client", 9);
 
-	console->info("colored pattern test");
-
+	Vulcanite::Log::Shutdown();
 	return 0;
 }
