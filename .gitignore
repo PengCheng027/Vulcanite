@@ -1,0 +1,40 @@
+# ===== Visual Studio =====
+.vs/
+.vsconfig
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# ===== 构建输出(用户指定忽略) =====
+bin/
+bin_int/
+Debug/
+Release/
+x64/
+x86/
+out/
+build/
+cmake-build-*/
+
+# ===== C/C++ 编译产物 =====
+*.obj
+*.o
+*.pdb
+*.idb
+*.ilk
+*.lib
+*.exe
+*.dll
+*.exp
+*.log
+*.tlog
+*.lastbuildstate
+*.ipdb
+*.iobj
+
+# ===== 其他 =====
+*.swp
+*~
+.DS_Store
+Thumbs.db
