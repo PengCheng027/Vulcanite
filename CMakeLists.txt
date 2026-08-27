@@ -27,6 +27,13 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin)
 set(SPDLOG_BUILD_EXAMPLE OFF CACHE BOOL "" FORCE)
 add_subdirectory(Vendor/spdlog)
 
+# ===== 第三方库:GLFW (子模块,静态库) =====
+set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(GLFW_INSTALL OFF CACHE BOOL "" FORCE)
+add_subdirectory(Vendor/glfw)
+
 # ===== 自动收集引擎源码 (src 下所有 .cpp 和 .h) =====
 file(GLOB_RECURSE VULCANITE_CPP CONFIGURE_DEPENDS
     ${CMAKE_SOURCE_DIR}/Vulcanite/src/*.cpp
@@ -45,7 +52,7 @@ add_executable(Vulcanite
     ${VULCANITE_HPP}
 )
 
-target_link_libraries(Vulcanite PRIVATE spdlog::spdlog)
+target_link_libraries(Vulcanite PRIVATE spdlog::spdlog glfw)
 target_include_directories(Vulcanite PRIVATE
     ${CMAKE_SOURCE_DIR}/Vulcanite/src
 )
