@@ -10,9 +10,10 @@ else()
     add_compile_options(-Wall -Wextra)
 endif()
 
-# Debug 构建定义 VULCANITE_DEBUG,启用日志输出
+# Debug 构建定义 VULCANITE_DEBUG(启用日志)与 VULCANITE_ENABLE_ASSERTS(启用断言)
 if(CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_CONFIGURATION_TYPES MATCHES "Debug")
     add_compile_definitions(VULCANITE_DEBUG)
+    add_compile_definitions(VULCANITE_ENABLE_ASSERTS)
 endif()
 
 set(CMAKE_CXX_STANDARD 20)
