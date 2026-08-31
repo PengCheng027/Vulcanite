@@ -35,6 +35,12 @@ set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(GLFW_INSTALL OFF CACHE BOOL "" FORCE)
 add_subdirectory(Vendor/glfw)
 
+# ===== Vulkan SDK (需 VULKAN_SDK 环境变量,缺失时用 setup_vulkan.py 安装) =====
+if(NOT DEFINED ENV{VULKAN_SDK})
+    message(WARNING "未检测到 VULKAN_SDK 环境变量!请运行: python setup_vulkan.py --auto")
+endif()
+find_package(Vulkan REQUIRED)
+
 # ===== 自动收集引擎源码 (src 下所有 .cpp 和 .h) =====
 file(GLOB_RECURSE VULCANITE_CPP CONFIGURE_DEPENDS
     ${CMAKE_SOURCE_DIR}/Vulcanite/src/*.cpp
@@ -53,7 +59,8 @@ add_executable(Vulcanite
     ${VULCANITE_HPP}
 )
 
-target_link_libraries(Vulcanite PRIVATE spdlog::spdlog glfw)
+target_link_libraries(Vulcanite PRIVATE spdlog::spdlog glfw Vulkan::Vulkan)
 target_include_directories(Vulcanite PRIVATE
     ${CMAKE_SOURCE_DIR}/Vulcanite/src
+    ${CMAKE_SOURCE_DIR}/Vendor/glm
 )
