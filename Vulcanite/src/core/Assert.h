@@ -1,0 +1,20 @@
+#pragma once
+
+#include "Core/Base.h"
+#include "Core/VulLog.h"
+
+#ifdef VULCANITE_ENABLE_ASSERTS
+
+	#define VULCANITE_INTERNAL_ASSERT_IMPL(type, check, msg, ...) { if(!(check)) { VULCANITE##type##ERROR(msg, __VA_ARGS__); VULCANITE_DEBUGBREAK(); } }
+	#define VULCANITE_INTERNAL_ASSERT_WITH_MSG(type, check, ...) VULCANITE_INTERNAL_ASSERT_IMPL(type, check, "Assertion failed: {0}", __VA_ARGS__)
+	#define VULCANITE_INTERNAL_ASSERT_NO_MSG(type, check) VULCANITE_INTERNAL_ASSERT_IMPL(type, check, "Assertion '{0}' failed at {1}:{2}", VULCANITE_STRINGIFY_MACRO(check), std::filesystem::path(__FILE__).filename().string(), __LINE__)
+
+	#define VULCANITE_INTERNAL_ASSERT_GET_MACRO_NAME(arg1, arg2, macro, ...) macro
+	#define VULCANITE_INTERNAL_ASSERT_GET_MACRO(...) VULCANITE_EXPAND_MACRO( VULCANITE_INTERNAL_ASSERT_GET_MACRO_NAME(__VA_ARGS__, VULCANITE_INTERNAL_ASSERT_WITH_MSG, VULCANITE_INTERNAL_ASSERT_NO_MSG) )
+
+	#define VULCANITE_ASSERT(...) VULCANITE_EXPAND_MACRO( VULCANITE_INTERNAL_ASSERT_GET_MACRO(__VA_ARGS__)(_, __VA_ARGS__) )
+	#define VULCANITE_CORE_ASSERT(...) VULCANITE_EXPAND_MACRO( VULCANITE_INTERNAL_ASSERT_GET_MACRO(__VA_ARGS__)(_CORE_, __VA_ARGS__) )
+#else
+	#define VULCANITE_ASSERT(...)
+	#define VULCANITE_CORE_ASSERT(...)
+#endif
