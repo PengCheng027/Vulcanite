@@ -1,4 +1,5 @@
 #include "Core/VulLog.h"
+#include "Core/Assert.h"
 
 #include "Events/ApplicationEvent.h"
 #include "Events/KeyEvent.h"
@@ -42,13 +43,12 @@ namespace Vulcanite {
 			glfwSetErrorCallback(GLFWErrorCallback);
 
 			sGLFWInitialized = true;
-
 		}
 
-		m_Window = glfwCreateWindow((int)props.Width, (int)props.Height, m_Data.Title.c_str(),
-			nullptr, nullptr); // this function will create a window pointer and context
-
-		glfwMakeContextCurrent(m_Window); // this function make the window in current context
+		m_Context = GraphicsContext::Create();
+		m_Context->Init(static_cast<int>(props.Width), static_cast<int>(props.Height));
+		m_Window = static_cast<GLFWwindow*>(m_Context->GetWindowHandle());
+		//glfwMakeContextCurrent(m_Window); // this function make the window in current context
 		//int status = gladLoadGLLoader((GLADloadproc)glfwGetProcAddress);
 		//HZ_CORE_ASSERT(status, "Faild to initialize Glad!");
 		glfwSetWindowUserPointer(m_Window, &m_Data); // set some information of window to use later
@@ -150,21 +150,12 @@ namespace Vulcanite {
 	void WindowsWindow::OnUpdate() {
 		// this function will process events in queue
 		glfwPollEvents();
-
-		glfwSwapBuffers(m_Window);
+		// 注意:Vulkan 不使用 glfwSwapBuffers,呈现由 vkQueuePresentKHR 完成
 	}
 
 	void WindowsWindow::SetVSync(bool enable) {
-
-		if (enable) {
-			// wait for SwapBuffer is ready to swap
-			glfwSwapInterval(1);
-		}
-		else {
-			// Swap buffer immediately, event the buffer is'n ready
-			glfwSwapInterval(0);
-		}
-
+		// Vulkan 的垂直同步由交换链的 present mode 控制(FIFO = 开, IMMEDIATE = 关),
+		// 不由 glfwSwapInterval 控制(那是 OpenGL 专属, Vulkan 无 GL 上下文会报错)
 		m_Data.VSync = enable;
 	}
 

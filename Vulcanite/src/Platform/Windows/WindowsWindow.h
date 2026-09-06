@@ -2,7 +2,10 @@
 
 #include <GLFW/glfw3.h>
 
+#include "Core/Base.h"
 #include "Core/Window.h"
+
+#include "Renderer/GraphicsContext.h"
 
 namespace Vulcanite {
 	class WindowsWindow :public Window {
@@ -25,6 +28,7 @@ namespace Vulcanite {
 
 	private:
 		GLFWwindow* m_Window;
+		Scope<GraphicsContext> m_Context;
 
 		struct WindowData {
 

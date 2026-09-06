@@ -1,8 +1,10 @@
+#include <GLFW/glfw3.h>
+
 #include "Core/VulLog.h"
-#include "Core/Core.h"
+#include "Core/Assert.h"
 #include "Core/Timestep.h"
 
-#include <GLFW/glfw3.h>
+#include "Renderer/Renderer.h"
 
 #include "Application.h"
 
@@ -15,6 +17,8 @@ namespace Vulcanite {
 
 		m_Window = std::unique_ptr<Window>(Window::Create());
 		m_Window->SetEventCallback(BIND_EVENT_FN(Application::OnEvent));
+
+		Renderer::Init();
 	}
 
 	Application:: ~Application() {
