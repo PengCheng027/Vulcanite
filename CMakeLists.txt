@@ -64,3 +64,16 @@ target_include_directories(Vulcanite PRIVATE
     ${CMAKE_SOURCE_DIR}/Vulcanite/src
     ${CMAKE_SOURCE_DIR}/Vendor/glm
 )
+
+# ===== 构建后把 spir_v 复制到 exe 旁边(任意工作目录都能读已编译 shader) =====
+add_custom_command(TARGET Vulcanite POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    ${CMAKE_SOURCE_DIR}/Vulcanite/assets/spir_v
+    $<TARGET_FILE_DIR:Vulcanite>/assets/spir_v
+    COMMENT "Copying spir_v to output directory"
+)
+
+# ===== VS 调试时工作目录设为 exe 所在目录(相对路径 assets/... 直接命中) =====
+set_target_properties(Vulcanite PROPERTIES
+    VS_DEBUGGER_WORKING_DIRECTORY $<TARGET_FILE_DIR:Vulcanite>
+)

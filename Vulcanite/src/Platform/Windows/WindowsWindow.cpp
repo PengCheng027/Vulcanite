@@ -150,7 +150,8 @@ namespace Vulcanite {
 	void WindowsWindow::OnUpdate() {
 		// this function will process events in queue
 		glfwPollEvents();
-		// 注意:Vulkan 不使用 glfwSwapBuffers,呈现由 vkQueuePresentKHR 完成
+		// Vulkan 的渲染 + 呈现走上下文接口(内部 vkQueuePresentKHR)
+		m_Context->OnFrame();
 	}
 
 	void WindowsWindow::SetVSync(bool enable) {
