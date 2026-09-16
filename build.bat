@@ -40,6 +40,10 @@ if not exist "%ROOT%\Vendor\glfw\CMakeLists.txt" (
     echo [Vulcanite] Submodule glfw missing, updating...
     git -C "%ROOT%" submodule update --init --recursive
 )
+if not exist "%ROOT%\Vendor\glm\CMakeLists.txt" (
+    echo [Vulcanite] Submodule glm missing, updating...
+    git -C "%ROOT%" submodule update --init --recursive
+)
 
 if not exist "%BUILD_DIR%\CMakeCache.txt" set RECONFIGURE=1
 if "%RECONFIGURE%"=="1" (
@@ -61,5 +65,6 @@ if errorlevel 1 (
 
 echo.
 echo [Vulcanite] Build OK: %CONFIG%
-echo [Vulcanite] Executable: %ROOT%\bin\%CONFIG%\Vulcanite.exe
+echo [Vulcanite] Executable: %ROOT%\bin\%CONFIG%\SandBox.exe
+echo [Vulcanite] Engine lib: %ROOT%\bin\%CONFIG%\Vulcanite.lib
 endlocal
