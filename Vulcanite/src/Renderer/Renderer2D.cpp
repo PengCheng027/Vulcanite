@@ -70,12 +70,13 @@ namespace Vulcanite {
 	}
 
 	void Renderer2D::EndSence() {
-		uint32_t vertextCount = static_cast<uint32_t>(s_Data.QuadVertexBufferPtr - s_Data.QuadVertexBufferBase);
-		s_Data.pMesh->SetVertexDatas(s_Data.QuadVertexBufferBase, vertextCount);
-		s_Data.pMesh->SetVertexCount(vertextCount);
+		uint32_t vertexCount = static_cast<uint32_t>(s_Data.QuadVertexBufferPtr - s_Data.QuadVertexBufferBase);
+		if (vertexCount == 0)
+			return;   // 本帧没有绘制任何 quad,不提交
 
-		uint32_t indexCount = vertextCount / 4 * 6;
+		s_Data.pMesh->SetVertexDatas(s_Data.QuadVertexBufferBase, vertexCount);
 
+		uint32_t indexCount = vertexCount / 4 * 6;
 		s_Data.pMesh->SetIndexCount(indexCount);
 
 		RenderCommand::DrawIndex(*s_Data.pMesh);

@@ -78,8 +78,6 @@ namespace Vulcanite {
 		void CreateCommandPool();
 
 		void CreateFramebuffers();
-		void CreateIndexBuffer();
-		void CreateVertexBuffer();
 		void CreateUniformBuffers();
 		void CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
 			VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory);
@@ -138,11 +136,6 @@ namespace Vulcanite {
 		VkPipeline m_GraphicsPipeline;
 
 		VkCommandPool m_CommandPool;
-
-		VkBuffer m_VertexBuffer;
-		VkDeviceMemory m_VertexBufferMemory;
-		VkBuffer m_IndexBuffer;
-		VkDeviceMemory m_IndexBufferMemory;
 
 		std::vector<VkBuffer> m_UniformBuffers;
 		std::vector<VkDeviceMemory> m_UniformBuffersMemory;

@@ -20,12 +20,14 @@ namespace Vulcanite {
 		return m_Indices;
 	}
 
-	uint32_t VulkanMesh::GetVertexCount()const {
-		return static_cast<uint32_t>(m_Vertices.size());
+	uint32_t VulkanMesh::GetVertexCount() const {
+		// 返回实际写入的顶点数(不是预分配容量 m_Vertices.size())
+		return m_VertexCount;
 	}
 
 	uint32_t VulkanMesh::GetIndexCount() const {
-		return static_cast<uint32_t>(m_Indices.size());
+		// 返回实际使用的索引数(不是预分配容量 m_Indices.size())
+		return m_IndexCount;
 	}
 	
 	void VulkanMesh::SetVertexCount(uint32_t vertexCount) {
@@ -39,17 +41,29 @@ namespace Vulcanite {
 	void VulkanMesh::SetIndexDatas(uint32_t* ipIndexes, uint32_t indexCount) {
 		if (indexCount == 0) {
 			VULCANITE_CORE_ASSERT(false, "indexes count is 0!");
+			return;
+		}
+		if (indexCount > m_Indices.size()) {
+			VULCANITE_CORE_ASSERT(false, "index data exceeds mesh capacity!");
+			return;
 		}
 
 		memcpy(m_Indices.data(), ipIndexes, indexCount * sizeof(uint32_t));
+		m_IndexCount = indexCount;   // 同步实际数量
 	}
 
 	void VulkanMesh::SetVertexDatas(Vertex* ipVertexes, uint32_t vertexCount) {
 		if (vertexCount == 0) {
 			VULCANITE_CORE_ASSERT(false, "vertex count is 0!");
+			return;
+		}
+		if (vertexCount > m_Vertices.size()) {
+			VULCANITE_CORE_ASSERT(false, "vertex data exceeds mesh capacity!");
+			return;
 		}
 
 		memcpy(m_Vertices.data(), ipVertexes, vertexCount * sizeof(Vertex));
+		m_VertexCount = vertexCount;   // 同步实际数量
 	}
 
 	VkVertexInputBindingDescription VulkanMesh::GetBindingDescription() {

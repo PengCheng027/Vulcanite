@@ -23,18 +23,8 @@ namespace Vulcanite {
 		alignas(16) glm::mat4 proj;
 	};
 
-	const std::vector<Vertex> vertices = {
-		{{-0.5f,-0.5f},{1.0f,0.0f,0.0f}},
-		{{0.5f,-0.5f},{0.0f,1.0f,0.0f}},
-		{{0.5f,0.5f},{0.0f,0.0f,1.0f}},
-		{{-0.5f,0.5f},{1.0f,1.0f,1.0f}}
-	};
-
-	const std::vector<uint32_t> indices = {
-		0,1,2,2,3,0
-	};
-
-	VulkanMesh QuadMesh(vertices, indices);
+	// 注:静态四边形数据已移除。几何数据现在由应用层(Renderer2D)每帧通过
+	// UploadDynamicGeometry 提交到动态批缓冲,顶点属性描述用 VulkanMesh 的静态方法。
 
 	VulkanContext* VulkanContext::s_Instance = nullptr;
 
@@ -61,12 +51,6 @@ namespace Vulcanite {
 
 		vkDestroyDescriptorPool(m_Device, m_DescriptorPool, nullptr);
 		vkDestroyDescriptorSetLayout(m_Device, m_DescriptorSetLayout, nullptr);
-
-		vkDestroyBuffer(m_Device, m_VertexBuffer, nullptr);
-		vkFreeMemory(m_Device, m_VertexBufferMemory, nullptr);
-
-		vkDestroyBuffer(m_Device, m_IndexBuffer, nullptr);
-		vkFreeMemory(m_Device, m_IndexBufferMemory, nullptr);
 
 		for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
 			vkDestroySemaphore(m_Device, m_ImageAvailableSemaphores[i], nullptr);
@@ -113,8 +97,6 @@ namespace Vulcanite {
 		CreateGraphicsPipeline();
 		CreateFramebuffers();
 		CreateCommandPool();
-		CreateIndexBuffer();
-		CreateVertexBuffer();
 		CreateUniformBuffers();
 		CreateDescriptorPool();
 		CreateDescriptorSets();
@@ -718,48 +700,9 @@ namespace Vulcanite {
 		}
 	}
 
-	void VulkanContext::CreateIndexBuffer() {
-		VkDeviceSize bufferSize = sizeof(QuadMesh.GetIndices()[0]) * QuadMesh.GetIndexCount();
-
-		VkBuffer stagingBuffer;
-		VkDeviceMemory stagingBufferMemory;
-		CreateBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-			stagingBuffer, stagingBufferMemory);
-
-		void* data;
-		vkMapMemory(m_Device, stagingBufferMemory, 0, bufferSize, 0, &data);
-		memcpy(data, QuadMesh.GetIndices().data(), bufferSize);
-		vkUnmapMemory(m_Device, stagingBufferMemory);
-
-		CreateBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-			m_IndexBuffer, m_IndexBufferMemory);
-
-		CopyBuffer(stagingBuffer, m_IndexBuffer, bufferSize);
-
-		vkDestroyBuffer(m_Device, stagingBuffer, nullptr);
-		vkFreeMemory(m_Device, stagingBufferMemory, nullptr);
-	}
-
-	void VulkanContext::CreateVertexBuffer() {
-		VkDeviceSize bufferSize = sizeof(QuadMesh.GetVertices()[0]) * QuadMesh.GetVertexCount();
-
-		VkBuffer stagingBuffer;
-		VkDeviceMemory stagingBufferMemory;
-		CreateBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-			stagingBuffer, stagingBufferMemory);
-
-		void* data;
-		vkMapMemory(m_Device, stagingBufferMemory, 0, bufferSize, 0, &data);
-		memcpy(data, QuadMesh.GetVertices().data(), bufferSize);
-		vkUnmapMemory(m_Device, stagingBufferMemory);
-
-		CreateBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-			m_VertexBuffer, m_VertexBufferMemory);
-
-		CopyBuffer(stagingBuffer, m_VertexBuffer, bufferSize);
-		vkDestroyBuffer(m_Device, stagingBuffer, nullptr);
-		vkFreeMemory(m_Device, stagingBufferMemory, nullptr);
-	}
+	// 注:静态顶点/索引缓冲(CreateVertexBuffer / CreateIndexBuffer)已移除。
+	// 几何数据改由应用层(Renderer2D)每帧通过 UploadDynamicGeometry 提交到动态批缓冲,
+	// 由 RecordCommandBuffer 绑定动态缓冲完成绘制。CopyBuffer 保留,供后续加载模型/纹理使用。
 
 	void VulkanContext::CreateUniformBuffers() {
 		VkDeviceSize bufferSize = sizeof(UniformBufferObject);
