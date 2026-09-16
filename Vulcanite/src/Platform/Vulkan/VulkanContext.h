@@ -21,6 +21,17 @@ namespace Vulcanite {
 
 		void* GetWindowHandle() const override;
 
+		// ===== 动态批缓冲接口(CPU 每帧写入几何数据,host-visible 常驻映射) =====
+		// 上传本帧收集到的顶点/索引数据(字节级接口,避免头文件暴露顶点类型)
+		// 返回 false 表示超出容量(数据未写入)
+		bool UploadDynamicGeometry(const void* vertexData, VkDeviceSize vertexBytes,
+			const void* indexData, VkDeviceSize indexBytes);
+
+		VkBuffer GetDynamicVertexBuffer() const;
+		VkBuffer GetDynamicIndexBuffer() const;
+		uint32_t GetDynamicIndexCount() const;
+
+		static VulkanContext* Get();
 	private:
 		struct QueueFamilyIndices {
 			std::optional<uint32_t> graphicsFamily;
@@ -80,11 +91,15 @@ namespace Vulcanite {
 		void CreateCommandBuffer();
 		void CreateSynObjects();
 
+		// 动态批缓冲:创建(含常驻映射)与销毁
+		void CreateDynamicBuffers();
+		void DestroyDynamicBuffers();
+
 		void UpdateUniformBuffer(uint32_t currentImage);
 		void RecordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex);
 		void DrawFrame();
 
-
+		
 		static VkResult CreateDebugUtilsMessengerEXT(
 			VkInstance instance,
 			const VkDebugUtilsMessengerCreateInfoEXT* pCreateInfo,
@@ -144,6 +159,24 @@ namespace Vulcanite {
 		std::vector<VkSemaphore> m_RenderFinishedSemaphores;
 		std::vector<VkFence> m_ImagesFlight;
 
+		// ===== 动态批缓冲(每帧一份, host-visible + 常驻映射, CPU 直接 memcpy) =====
+		std::vector<VkBuffer> m_DynamicVertexBuffers;
+		std::vector<VkDeviceMemory> m_DynamicVertexMemory;
+		std::vector<void*> m_DynamicVertexMapped;
+
+		std::vector<VkBuffer> m_DynamicIndexBuffers;
+		std::vector<VkDeviceMemory> m_DynamicIndexMemory;
+		std::vector<void*> m_DynamicIndexMapped;
+
+		std::vector<uint32_t> m_DynamicIndexCounts;   // 每帧实际写入的索引数
+
+		VkDeviceSize m_DynamicVertexCapacityBytes = 0;
+		VkDeviceSize m_DynamicIndexCapacityBytes = 0;
+
+		// 容量按 Renderer2D 目标(MaxQuads = 20000,每 quad 4 顶点 6 索引)留足余量
+		static constexpr uint32_t MAX_DYNAMIC_VERTICES = 100000;
+		static constexpr uint32_t MAX_DYNAMIC_INDICES = 150000;
+
 		int m_CurrentFrame = 0;
 
 		static const int MAX_FRAMES_IN_FLIGHT = 2;
@@ -155,5 +188,7 @@ namespace Vulcanite {
 		const std::vector<const char*> m_DeviceExtensions = {
 			VK_KHR_SWAPCHAIN_EXTENSION_NAME
 		};
+
+		static VulkanContext* s_Instance;
 	};
 }

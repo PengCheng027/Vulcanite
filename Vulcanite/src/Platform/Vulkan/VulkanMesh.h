@@ -15,18 +15,20 @@ namespace Vulcanite {
 		uint32_t GetVertexCount() const override;
 		uint32_t GetIndexCount() const override;
 
-		// Vulkan 专用(共 VulkanRenderer 用)
-		VkBuffer GetVertexBuffer() const;
-		VkBuffer GetIndexBuffer() const;
-		uint32_t GetIndexCountVk() const;
+		void SetVertexCount(uint32_t vertexCount) override;
+		void SetIndexCount(uint32_t indexCount) override;
+
+		void SetIndexDatas(uint32_t* ipIndexes, uint32_t indexCount) override;
+		void SetVertexDatas(Vertex* ipVertexes, uint32_t vertexCount) override;
+
+		static VkVertexInputBindingDescription GetBindingDescription();
+		static std::vector<VkVertexInputAttributeDescription> GetAttributeDescriptions();
 	private:
-		void CreateGPUBuffers();	// 上传到显存
 
 		std::vector<Vertex> m_Vertices;
 		std::vector<uint32_t> m_Indices;
-		VkBuffer m_VertexBuffer = VK_NULL_HANDLE;
-		VkDeviceMemory m_VertexMemory = VK_NULL_HANDLE;
-		VkBuffer m_IndexBuffer = VK_NULL_HANDLE;
-		VkDeviceMemory m_IndexMemory = VK_NULL_HANDLE;
+
+		uint32_t m_VertexCount = 0;
+		uint32_t m_IndexCount = 0;
 	};
 }

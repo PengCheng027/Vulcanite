@@ -12,40 +12,11 @@
 #include "Core/VulLog.h"
 
 #include "Platform/Vulkan/VulkanContext.h"
+#include "Platform/Vulkan/VulkanMesh.h"
 
 #include "Utils/FileUtils.h"
 
 namespace Vulcanite {
-	struct Vertex {
-		glm::vec2 m_Pos;
-		glm::vec3 m_Color;
-
-		static VkVertexInputBindingDescription GetBindingDescription() {
-			VkVertexInputBindingDescription bindingDescription{};
-			bindingDescription.binding = 0;
-			bindingDescription.stride = sizeof(Vertex);
-			bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-
-			return bindingDescription;
-		}
-
-		static std::array<VkVertexInputAttributeDescription, 2> GetAttributeDescriptions() {
-			std::array<VkVertexInputAttributeDescription, 2> attributeDescriptions{};
-
-			attributeDescriptions[0].binding = 0;
-			attributeDescriptions[0].location = 0;
-			attributeDescriptions[0].format = VK_FORMAT_R32G32_SFLOAT;
-			attributeDescriptions[0].offset = offsetof(Vertex, m_Pos);
-
-			attributeDescriptions[1].binding = 0;
-			attributeDescriptions[1].location = 1;
-			attributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
-			attributeDescriptions[1].offset = offsetof(Vertex, m_Color);
-
-			return attributeDescriptions;
-		}
-	};
-
 	struct UniformBufferObject {
 		alignas(16) glm::mat4 model;
 		alignas(16) glm::mat4 view;
@@ -59,15 +30,21 @@ namespace Vulcanite {
 		{{-0.5f,0.5f},{1.0f,1.0f,1.0f}}
 	};
 
-	const std::vector<uint16_t> indices = {
+	const std::vector<uint32_t> indices = {
 		0,1,2,2,3,0
 	};
 
+	VulkanMesh QuadMesh(vertices, indices);
+
+	VulkanContext* VulkanContext::s_Instance = nullptr;
+
 	VulkanContext::VulkanContext(GLFWwindow* windowHandle)
 		: m_WindowHandle(windowHandle) {
+		s_Instance = this;
 	}
 
 	VulkanContext::~VulkanContext() {
+		s_Instance = nullptr;
 		// 等待 GPU 完成所有已提交的命令,再销毁资源
 		// (否则可能销毁仍在被命令缓冲使用的 framebuffer 等,触发 VUID-vkDestroyFramebuffer-framebuffer-00892)
 		vkDeviceWaitIdle(m_Device);
@@ -99,6 +76,8 @@ namespace Vulcanite {
 		for (size_t i = 0; i < m_RenderFinishedSemaphores.size(); i++) {
 			vkDestroySemaphore(m_Device, m_RenderFinishedSemaphores[i], nullptr);
 		}
+
+		DestroyDynamicBuffers();
 
 		vkDestroyCommandPool(m_Device, m_CommandPool, nullptr);
 
@@ -141,6 +120,7 @@ namespace Vulcanite {
 		CreateDescriptorSets();
 		CreateCommandBuffer();
 		CreateSynObjects();
+		CreateDynamicBuffers();
 
 		VULCANITE_CORE_INFO("Vulkan context initialized successfully (swapchain {0}x{1})",
 			m_SwapChainExtent.width, m_SwapChainExtent.height);
@@ -600,8 +580,8 @@ namespace Vulcanite {
 		fragShaderStageInfo.pName = "main";
 
 		VkPipelineShaderStageCreateInfo shaderStages[] = { vertShaderStageInfo,fragShaderStageInfo };
-		VkVertexInputBindingDescription bindingDescription = Vertex::GetBindingDescription();
-		std::array<VkVertexInputAttributeDescription, 2> attributeDescriptions = Vertex::GetAttributeDescriptions();
+		VkVertexInputBindingDescription bindingDescription = VulkanMesh::GetBindingDescription();
+		std::vector<VkVertexInputAttributeDescription> attributeDescriptions = VulkanMesh::GetAttributeDescriptions();
 
 		VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
 		vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
@@ -739,7 +719,7 @@ namespace Vulcanite {
 	}
 
 	void VulkanContext::CreateIndexBuffer() {
-		VkDeviceSize bufferSize = sizeof(indices[0]) * indices.size();
+		VkDeviceSize bufferSize = sizeof(QuadMesh.GetIndices()[0]) * QuadMesh.GetIndexCount();
 
 		VkBuffer stagingBuffer;
 		VkDeviceMemory stagingBufferMemory;
@@ -748,7 +728,7 @@ namespace Vulcanite {
 
 		void* data;
 		vkMapMemory(m_Device, stagingBufferMemory, 0, bufferSize, 0, &data);
-		memcpy(data, indices.data(), bufferSize);
+		memcpy(data, QuadMesh.GetIndices().data(), bufferSize);
 		vkUnmapMemory(m_Device, stagingBufferMemory);
 
 		CreateBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
@@ -761,7 +741,7 @@ namespace Vulcanite {
 	}
 
 	void VulkanContext::CreateVertexBuffer() {
-		VkDeviceSize bufferSize = sizeof(vertices[0]) * vertices.size();
+		VkDeviceSize bufferSize = sizeof(QuadMesh.GetVertices()[0]) * QuadMesh.GetVertexCount();
 
 		VkBuffer stagingBuffer;
 		VkDeviceMemory stagingBufferMemory;
@@ -770,7 +750,7 @@ namespace Vulcanite {
 
 		void* data;
 		vkMapMemory(m_Device, stagingBufferMemory, 0, bufferSize, 0, &data);
-		memcpy(data, vertices.data(), bufferSize);
+		memcpy(data, QuadMesh.GetVertices().data(), bufferSize);
 		vkUnmapMemory(m_Device, stagingBufferMemory);
 
 		CreateBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
@@ -955,6 +935,106 @@ namespace Vulcanite {
 		}
 	}
 
+	void VulkanContext::CreateDynamicBuffers() {
+		const VkDeviceSize vertexBytes = static_cast<VkDeviceSize>(MAX_DYNAMIC_VERTICES) * sizeof(Vertex);
+		const VkDeviceSize indexBytes = static_cast<VkDeviceSize>(MAX_DYNAMIC_INDICES) * sizeof(uint32_t);
+
+		m_DynamicVertexCapacityBytes = vertexBytes;
+		m_DynamicIndexCapacityBytes = indexBytes;
+
+		const size_t frameCount = MAX_FRAMES_IN_FLIGHT;
+		m_DynamicVertexBuffers.resize(frameCount);
+		m_DynamicVertexMemory.resize(frameCount);
+		m_DynamicVertexMapped.resize(frameCount);
+		m_DynamicIndexBuffers.resize(frameCount);
+		m_DynamicIndexMemory.resize(frameCount);
+		m_DynamicIndexMapped.resize(frameCount);
+		m_DynamicIndexCounts.assign(frameCount, 0);
+
+		// CPU 可直接写入的内存类型;HOST_COHERENT 保证 memcpy 后 GPU 立即可见(无需手动 flush)
+		const VkMemoryPropertyFlags hostFlags =
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+
+		for (size_t i = 0; i < frameCount; i++) {
+			// 动态顶点缓冲:创建 + 常驻映射(后面每帧直接 memcpy 写入)
+			CreateBuffer(vertexBytes, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, hostFlags,
+				m_DynamicVertexBuffers[i], m_DynamicVertexMemory[i]);
+			VkResult mapVRes = vkMapMemory(m_Device, m_DynamicVertexMemory[i], 0, vertexBytes, 0, &m_DynamicVertexMapped[i]);
+			VULCANITE_CORE_ASSERT(mapVRes == VK_SUCCESS, "failed to map dynamic vertex buffer!");
+
+			// 动态索引缓冲:批处理合并后顶点数可能超过 65535,故统一使用 uint32 索引
+			CreateBuffer(indexBytes, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, hostFlags,
+				m_DynamicIndexBuffers[i], m_DynamicIndexMemory[i]);
+			VkResult mapIRes = vkMapMemory(m_Device, m_DynamicIndexMemory[i], 0, indexBytes, 0, &m_DynamicIndexMapped[i]);
+			VULCANITE_CORE_ASSERT(mapIRes == VK_SUCCESS, "failed to map dynamic index buffer!");
+		}
+
+		VULCANITE_CORE_INFO("Dynamic batch buffers ready: capacity {0} vertices / {1} indices per frame, {2} frames",
+			MAX_DYNAMIC_VERTICES, MAX_DYNAMIC_INDICES, frameCount);
+	}
+
+	void VulkanContext::DestroyDynamicBuffers() {
+		for (size_t i = 0; i < m_DynamicVertexBuffers.size(); i++) {
+			vkUnmapMemory(m_Device, m_DynamicVertexMemory[i]);
+			vkDestroyBuffer(m_Device, m_DynamicVertexBuffers[i], nullptr);
+			vkFreeMemory(m_Device, m_DynamicVertexMemory[i], nullptr);
+		}
+
+		for (size_t i = 0; i < m_DynamicIndexBuffers.size(); i++) {
+			vkUnmapMemory(m_Device, m_DynamicIndexMemory[i]);
+			vkDestroyBuffer(m_Device, m_DynamicIndexBuffers[i], nullptr);
+			vkFreeMemory(m_Device, m_DynamicIndexMemory[i], nullptr);
+		}
+
+		m_DynamicVertexBuffers.clear();
+		m_DynamicVertexMemory.clear();
+		m_DynamicVertexMapped.clear();
+		m_DynamicIndexBuffers.clear();
+		m_DynamicIndexMemory.clear();
+		m_DynamicIndexMapped.clear();
+		m_DynamicIndexCounts.clear();
+	}
+
+	bool VulkanContext::UploadDynamicGeometry(const void* vertexData, VkDeviceSize vertexBytes,
+		const void* indexData, VkDeviceSize indexBytes) {
+
+		// 容量校验:超出则拒绝写入,避免越界覆写映射内存
+		if (vertexBytes > m_DynamicVertexCapacityBytes || indexBytes > m_DynamicIndexCapacityBytes) {
+			VULCANITE_CORE_ERROR("Dynamic geometry exceeds capacity: vertices {0}/{1} bytes, indices {2}/{3} bytes",
+				vertexBytes, m_DynamicVertexCapacityBytes, indexBytes, m_DynamicIndexCapacityBytes);
+			return false;
+		}
+
+		const size_t frame = static_cast<size_t>(m_CurrentFrame);
+
+		// host-coherent 内存:memcpy 后 GPU 立即可见,无需 vkFlushMappedMemoryRanges
+		if (vertexData != nullptr && vertexBytes > 0)
+			memcpy(m_DynamicVertexMapped[frame], vertexData, static_cast<size_t>(vertexBytes));
+		if (indexData != nullptr && indexBytes > 0)
+			memcpy(m_DynamicIndexMapped[frame], indexData, static_cast<size_t>(indexBytes));
+
+		m_DynamicIndexCounts[frame] = static_cast<uint32_t>(indexBytes / sizeof(uint32_t));
+		return true;
+	}
+
+	VkBuffer VulkanContext::GetDynamicVertexBuffer() const {
+		if (m_DynamicVertexBuffers.empty())
+			return VK_NULL_HANDLE;
+		return m_DynamicVertexBuffers[static_cast<size_t>(m_CurrentFrame)];
+	}
+
+	VkBuffer VulkanContext::GetDynamicIndexBuffer() const {
+		if (m_DynamicIndexBuffers.empty())
+			return VK_NULL_HANDLE;
+		return m_DynamicIndexBuffers[static_cast<size_t>(m_CurrentFrame)];
+	}
+
+	uint32_t VulkanContext::GetDynamicIndexCount() const {
+		if (m_DynamicIndexCounts.empty())
+			return 0;
+		return m_DynamicIndexCounts[static_cast<size_t>(m_CurrentFrame)];
+	}
+
 	VkResult VulkanContext::CreateDebugUtilsMessengerEXT(
 		VkInstance instance,
 		const VkDebugUtilsMessengerCreateInfoEXT* pCreateInfo,
@@ -1036,16 +1116,15 @@ namespace Vulcanite {
 	}
 
 	void VulkanContext::UpdateUniformBuffer(uint32_t currentImage) {
-		static auto startTime = std::chrono::high_resolution_clock::now();
-
-		auto currentTime = std::chrono::high_resolution_clock::now();
-		float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
-
+		// 顶点数据已是世界坐标(Renderer2D 在 CPU 端只做物体变换,不做投影),
+		// 因此这里 model/view 为单位矩阵,proj 使用 2D 正交投影。
+		// 注意 bottom=1, top=-1:正交矩阵自带 Y 翻转,适配 Vulkan 的 NDC(Y 轴向下)。
 		UniformBufferObject ubo{};
-		ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-		ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-		ubo.proj = glm::perspective(glm::radians(45.0f), (float)m_SwapChainExtent.width / (float)m_SwapChainExtent.height, 0.1f, 10.0f);
-		ubo.proj[1][1] *= -1;  // Vulkan 的 Y 轴向下,翻转投影矩阵
+		ubo.model = glm::mat4(1.0f);
+		ubo.view = glm::mat4(1.0f);
+
+		float aspect = (float)m_SwapChainExtent.width / (float)m_SwapChainExtent.height;
+		ubo.proj = glm::ortho(-aspect, aspect, 1.0f, -1.0f, -1.0f, 1.0f);
 
 		memcpy(m_UniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
 	}
@@ -1086,16 +1165,18 @@ namespace Vulcanite {
 		scissor.extent = m_SwapChainExtent;
 		vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
-		VkBuffer vertexBuffers[] = { m_VertexBuffer };
+		VkBuffer vb = GetDynamicVertexBuffer();
+		VkBuffer vertexBuffers[] = { vb };
 		VkDeviceSize offsets[] = { 0 };
 		vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
 
-		vkCmdBindIndexBuffer(commandBuffer, m_IndexBuffer, 0, VK_INDEX_TYPE_UINT16);
+		VkBuffer ib = GetDynamicIndexBuffer();
+		vkCmdBindIndexBuffer(commandBuffer, ib, 0, VK_INDEX_TYPE_UINT32);
 
 		vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
 			m_PipelineLayout, 0, 1, &m_DescriptorSets[m_CurrentFrame], 0, nullptr);
 
-		vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
+		vkCmdDrawIndexed(commandBuffer, GetDynamicIndexCount(), 1, 0, 0, 0);
 
 		vkCmdEndRenderPass(commandBuffer);
 
@@ -1167,5 +1248,9 @@ namespace Vulcanite {
 		VULCANITE_CORE_ASSERT(presentRes == VK_SUCCESS, "failed to present swap chain image!");
 
 		m_CurrentFrame = (m_CurrentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
+	}
+
+	VulkanContext* VulkanContext::Get() {
+		return s_Instance;
 	}
 }

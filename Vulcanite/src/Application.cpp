@@ -23,6 +23,8 @@ namespace Vulcanite {
 
 	Application:: ~Application() {
 		s_Instance = nullptr;
+
+		Renderer::ShutDown();
 	}
 
 	void Application::PushLayer(Layer* layer) {

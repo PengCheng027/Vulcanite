@@ -6,4 +6,8 @@ namespace Vulcanite {
 	void RenderCommand::Init() {
 		s_RendererAPI->Init();
 	}
+
+	void RenderCommand::DrawIndex(const Mesh& mesh) {
+		s_RendererAPI->DrawIndex(mesh);
+	}
 }

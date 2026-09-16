@@ -1,11 +1,13 @@
 #include "Core/VulLog.h"
 #include "Application.h"
 
+#include "SandBoxLayer.h"
+
 int main() {
-	// 彩色终端日志器
 	Vulcanite::Log::Init();
 
 	Vulcanite::Application app;
+	app.PushLayer(new Vulcanite::SandBoxLayer());
 	app.Run();
 
 	Vulcanite::Log::Shutdown();

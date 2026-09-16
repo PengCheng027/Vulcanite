@@ -2,6 +2,8 @@
 
 #include "Core/Base.h"
 
+#include "Renderer/Mesh.h"
+
 namespace Vulcanite {
 	class RendererAPI {
 	public:
@@ -13,6 +15,7 @@ namespace Vulcanite {
 		virtual ~RendererAPI() = default;
 
 		virtual void Init() = 0;
+		virtual void DrawIndex(const Mesh& mesh) = 0;
 
 		static API GetAPI();
 		static Scope<RendererAPI> Create();
