@@ -33,6 +33,11 @@ cmake-build-*/
 *.ipdb
 *.iobj
 
+# ===== 着色器编译产物 =====
+# assets/spir_v 下的 *.spv 由构建时 glslc 从 assets/shader/*.{vert,frag} 生成,
+# 属于中间产物,不入库(其它位置的 .spv 同理)
+*.spv
+
 # ===== 其他 =====
 *.swp
 *~
