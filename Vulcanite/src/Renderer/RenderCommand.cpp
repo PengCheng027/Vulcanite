@@ -7,6 +7,11 @@ namespace Vulcanite {
 		s_RendererAPI->Init();
 	}
 
+	void RenderCommand::Begin(const glm::mat4& viewProj) {
+		s_RendererAPI->Begin(viewProj);
+	}
+	
+
 	void RenderCommand::DrawIndex(const Mesh& mesh) {
 		s_RendererAPI->DrawIndex(mesh);
 	}

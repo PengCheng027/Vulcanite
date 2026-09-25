@@ -9,6 +9,7 @@ namespace Vulcanite {
 	class RenderCommand {
 	public:
 		static void Init();
+		static void Begin(const glm::mat4& viewProj);
 		static void DrawIndex(const Mesh& mesh);
 	private:
 		static Scope<RendererAPI> s_RendererAPI;

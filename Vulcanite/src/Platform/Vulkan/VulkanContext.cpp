@@ -5,9 +5,6 @@
 #include <chrono>
 #include <cstring>
 
-#include <glm/glm.hpp>
-#include <glm/gtc/matrix_transform.hpp>
-
 #include "Core/Assert.h"
 #include "Core/VulLog.h"
 
@@ -17,12 +14,6 @@
 #include "Utils/FileUtils.h"
 
 namespace Vulcanite {
-	struct UniformBufferObject {
-		alignas(16) glm::mat4 model;
-		alignas(16) glm::mat4 view;
-		alignas(16) glm::mat4 proj;
-	};
-
 	// 注:静态四边形数据已移除。几何数据现在由应用层(Renderer2D)每帧通过
 	// UploadDynamicGeometry 提交到动态批缓冲,顶点属性描述用 VulkanMesh 的静态方法。
 
@@ -960,6 +951,10 @@ namespace Vulcanite {
 		return true;
 	}
 
+	void VulkanContext::SetUniBufferObject(const UniformBufferObject& uniBufferObject) {
+		m_UniBufferObject = uniBufferObject;
+	}
+
 	VkBuffer VulkanContext::GetDynamicVertexBuffer() const {
 		if (m_DynamicVertexBuffers.empty())
 			return VK_NULL_HANDLE;
@@ -1059,17 +1054,9 @@ namespace Vulcanite {
 	}
 
 	void VulkanContext::UpdateUniformBuffer(uint32_t currentImage) {
-		// 顶点数据已是世界坐标(Renderer2D 在 CPU 端只做物体变换,不做投影),
-		// 因此这里 model/view 为单位矩阵,proj 使用 2D 正交投影。
-		// 注意 bottom=1, top=-1:正交矩阵自带 Y 翻转,适配 Vulkan 的 NDC(Y 轴向下)。
-		UniformBufferObject ubo{};
-		ubo.model = glm::mat4(1.0f);
-		ubo.view = glm::mat4(1.0f);
-
-		float aspect = (float)m_SwapChainExtent.width / (float)m_SwapChainExtent.height;
-		ubo.proj = glm::ortho(-aspect, aspect, 1.0f, -1.0f, -1.0f, 1.0f);
-
-		memcpy(m_UniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
+		// UBO 内容(视图投影矩阵)由上层相机的 Begin 经 SetUniBufferObject 提供,
+		// 这里只负责把它拷进当前帧的映射内存。顶点数据本身已是世界坐标。
+		memcpy(m_UniformBuffersMapped[currentImage], &m_UniBufferObject, sizeof(m_UniBufferObject));
 	}
 
 	void VulkanContext::RecordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex) {

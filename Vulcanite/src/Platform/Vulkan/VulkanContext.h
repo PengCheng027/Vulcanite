@@ -3,6 +3,7 @@
 #include <vector>
 #include <optional>
 
+#include <glm/glm.hpp>
 // 必须在包含 glfw3.h 之前定义,glfw3.h 才会声明 Vulkan 相关函数(glfwCreateWindowSurface 等)
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
@@ -11,6 +12,10 @@
 #include "Renderer/GraphicsContext.h"
 
 namespace Vulcanite {
+	struct UniformBufferObject {
+		alignas(16) glm::mat4 viewProj;
+	};
+
 	class VulkanContext : public GraphicsContext {
 	public:
 		VulkanContext(GLFWwindow* windowHandle = nullptr);
@@ -26,6 +31,8 @@ namespace Vulcanite {
 		// 返回 false 表示超出容量(数据未写入)
 		bool UploadDynamicGeometry(const void* vertexData, VkDeviceSize vertexBytes,
 			const void* indexData, VkDeviceSize indexBytes);
+
+		void SetUniBufferObject(const UniformBufferObject& uniBufferObject);
 
 		VkBuffer GetDynamicVertexBuffer() const;
 		VkBuffer GetDynamicIndexBuffer() const;
@@ -171,6 +178,8 @@ namespace Vulcanite {
 		static constexpr uint32_t MAX_DYNAMIC_INDICES = 150000;
 
 		int m_CurrentFrame = 0;
+
+		UniformBufferObject m_UniBufferObject = {};
 
 		static const int MAX_FRAMES_IN_FLIGHT = 2;
 

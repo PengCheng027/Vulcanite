@@ -46,7 +46,15 @@ namespace Vulcanite {
 	}
 
 	void SandBoxLayer::OnUpdate(Timestep ts) {
-		Renderer2D::BeginSence(glm::mat4(1.0f));
+		float aspect = 1280.0f / 720.0f;
+
+		// bottom=1, top=-1 → 正交矩阵自带 Y 翻转(适配 Vulkan 的 NDC Y 轴向下)
+		// near/far 用 0.1~100 是为了覆盖 lookAt 把物体推到相机空间 z=-2 的深度
+		glm::mat4 proj = glm::ortho(-aspect, aspect, 1.0f, -1.0f, -1.0f, 1.0f);
+
+		glm::mat4 viewProject = proj;
+
+		Renderer2D::BeginSence(viewProject);
 
 		// quad 默认是 1×1 世界单位,而网格间距只有 0.09:
 		// 缩小到 0.08×0.08,让 400 个矩形彼此分开(否则会糊成一片)

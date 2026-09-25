@@ -15,6 +15,7 @@ namespace Vulcanite {
 		virtual ~RendererAPI() = default;
 
 		virtual void Init() = 0;
+		virtual void Begin(const glm::mat4& viewProj) = 0;
 		virtual void DrawIndex(const Mesh& mesh) = 0;
 
 		static API GetAPI();

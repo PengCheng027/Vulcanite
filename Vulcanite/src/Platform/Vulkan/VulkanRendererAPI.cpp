@@ -7,6 +7,10 @@ namespace Vulcanite {
 	void VulkanRendererAPI::Init() {
 	}
 
+	void VulkanRendererAPI::Begin(const glm::mat4& viewProject) {
+		VulkanContext::Get()->SetUniBufferObject({ viewProject });
+	}
+
 	void VulkanRendererAPI::DrawIndex(const Mesh& mesh) {
 		const auto& vertices = mesh.GetVertices();
 		const auto& indices = mesh.GetIndices();

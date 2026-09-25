@@ -1,5 +1,3 @@
-#include <glm/gtc/matrix_transform.hpp>
-
 #include "Renderer/Renderer.h"
 #include "Renderer/Renderer2D.h"
 #include "Renderer/RenderCommand.h"
@@ -15,14 +13,8 @@ namespace Vulcanite {
 		Vertex* QuadVertexBufferBase = nullptr;
 		Vertex* QuadVertexBufferPtr = nullptr;
 
-		float aspect = 1280.0f / 720.0f;
-
-		// bottom=1, top=-1 → 正交矩阵自带 Y 翻转(适配 Vulkan 的 NDC Y 轴向下)
-		// near/far 用 0.1~100 是为了覆盖 lookAt 把物体推到相机空间 z=-2 的深度
-		glm::mat4 proj = glm::ortho(-aspect, aspect, 1.0f, -1.0f, 0.1f, 100.0f);
-
-		glm::mat4 ViewProject = proj *
-			glm::lookAt(glm::vec3(0.0f, 0.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+		// 视图投影矩阵由上层(SandBoxLayer 的相机)经 BeginSence 传入,
+		// 并直接转交渲染后端。此处不再保存/创建,避免出现第二份"真相"。
 
 		glm::vec4 QuadVertexPositions[4] = {};
 
@@ -66,6 +58,7 @@ namespace Vulcanite {
 	}
 
 	void Renderer2D::BeginSence(const glm::mat4& viewProjectMatrix) {
+		RenderCommand::Begin(viewProjectMatrix);
 		s_Data.QuadVertexBufferPtr = s_Data.QuadVertexBufferBase;
 	}
 
