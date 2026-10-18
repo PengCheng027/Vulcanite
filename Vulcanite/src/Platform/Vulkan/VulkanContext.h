@@ -9,9 +9,13 @@
 #include <GLFW/glfw3.h>
 #include <vulkan/vulkan.h>
 
+#include "Core/Base.h"
+
 #include "Renderer/GraphicsContext.h"
 
 namespace Vulcanite {
+	class VulkanPipeline;   // 具体实现,定义在 Platform/Vulkan/VulkanPipeline.h
+
 	struct UniformBufferObject {
 		alignas(16) glm::mat4 viewProj;
 	};
@@ -37,6 +41,10 @@ namespace Vulcanite {
 		VkBuffer GetDynamicVertexBuffer() const;
 		VkBuffer GetDynamicIndexBuffer() const;
 		uint32_t GetDynamicIndexCount() const;
+
+		VkDevice GetDevice() const;
+		VkRenderPass GetRenderPass() const;
+		VkCommandBuffer GetCurrentCommandBuffer() const;
 
 		static VulkanContext* Get();
 	private:
@@ -78,9 +86,7 @@ namespace Vulcanite {
 		void CreateImageViews();
 		void CreateRenderPass();
 
-		void CreateDescriptorSetLayout();
-		void CreateGraphicsPipeline();
-		VkShaderModule CreateShaderModule(const std::vector<char>& code);
+		void CreatePipeline();
 
 		void CreateCommandPool();
 
@@ -104,7 +110,6 @@ namespace Vulcanite {
 		void RecordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex);
 		void DrawFrame();
 
-		
 		static VkResult CreateDebugUtilsMessengerEXT(
 			VkInstance instance,
 			const VkDebugUtilsMessengerCreateInfoEXT* pCreateInfo,
@@ -138,9 +143,11 @@ namespace Vulcanite {
 		std::vector<VkFramebuffer> m_SwapChainFramebuffers;
 
 		VkRenderPass m_RenderPass;
-		VkDescriptorSetLayout m_DescriptorSetLayout;
-		VkPipelineLayout m_PipelineLayout;
-		VkPipeline m_GraphicsPipeline;
+
+		// 管线(着色器 + 顶点布局 + 固定功能状态 + 描述符布局)由 VulkanPipeline 拥有。
+		// 这是平台层内部,直接持有具体类型:拿 descriptor set layout / 绑描述符集都不必转型。
+		// (平台无关的 Pipeline 接口只给 Renderer/RenderCommand 那一侧用。)
+		Ref<VulkanPipeline> m_Pipeline;
 
 		VkCommandPool m_CommandPool;
 
@@ -152,6 +159,7 @@ namespace Vulcanite {
 		std::vector<VkDescriptorSet> m_DescriptorSets;
 
 		std::vector<VkCommandBuffer> m_CommandBuffers;
+		VkCommandBuffer m_CurrentCommandBuffer = VK_NULL_HANDLE;
 
 		std::vector<VkSemaphore> m_ImageAvailableSemaphores;
 		std::vector<VkFence> m_InFlightFences;

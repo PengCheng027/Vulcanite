@@ -5,6 +5,7 @@
 #include "Core/Base.h"
 
 namespace Vulcanite {
+	
 	struct Vertex {
 		glm::vec2 m_Pos;
 		glm::vec3 m_Color;

@@ -9,13 +9,11 @@
 #include "Core/VulLog.h"
 
 #include "Platform/Vulkan/VulkanContext.h"
-#include "Platform/Vulkan/VulkanMesh.h"
-
-#include "Utils/FileUtils.h"
+#include "Platform/Vulkan/VulkanPipeline.h"
 
 namespace Vulcanite {
-	// 注:静态四边形数据已移除。几何数据现在由应用层(Renderer2D)每帧通过
-	// UploadDynamicGeometry 提交到动态批缓冲,顶点属性描述用 VulkanMesh 的静态方法。
+	// 注:静态四边形数据已移除。几何数据由应用层(Renderer2D)每帧通过
+	// UploadDynamicGeometry 提交到动态批缓冲;管线(含顶点布局/着色器)由 VulkanPipeline 拥有。
 
 	VulkanContext* VulkanContext::s_Instance = nullptr;
 
@@ -41,7 +39,8 @@ namespace Vulcanite {
 		}
 
 		vkDestroyDescriptorPool(m_Device, m_DescriptorPool, nullptr);
-		vkDestroyDescriptorSetLayout(m_Device, m_DescriptorSetLayout, nullptr);
+		// 描述符池里的 set 先释放,再销毁管线(管线持有 descriptor set layout)
+		m_Pipeline.reset();
 
 		for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
 			vkDestroySemaphore(m_Device, m_ImageAvailableSemaphores[i], nullptr);
@@ -56,8 +55,6 @@ namespace Vulcanite {
 
 		vkDestroyCommandPool(m_Device, m_CommandPool, nullptr);
 
-		vkDestroyPipeline(m_Device, m_GraphicsPipeline, nullptr);
-		vkDestroyPipelineLayout(m_Device, m_PipelineLayout, nullptr);
 		vkDestroyRenderPass(m_Device, m_RenderPass, nullptr);
 
 		vkDestroyDevice(m_Device, nullptr);
@@ -84,8 +81,7 @@ namespace Vulcanite {
 		CreateSwapChain();
 		CreateImageViews();
 		CreateRenderPass();
-		CreateDescriptorSetLayout();
-		CreateGraphicsPipeline();
+		CreatePipeline();
 		CreateFramebuffers();
 		CreateCommandPool();
 		CreateUniformBuffers();
@@ -514,147 +510,33 @@ namespace Vulcanite {
 		
 	}
 
-	void VulkanContext::CreateDescriptorSetLayout() {
-		VkDescriptorSetLayoutBinding uboLayoutBinding{};
-		uboLayoutBinding.binding = 0;
-		uboLayoutBinding.descriptorCount = 1;
-		uboLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-		uboLayoutBinding.pImmutableSamplers = nullptr;
-		uboLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-
-		VkDescriptorSetLayoutCreateInfo layoutInfo{};
-		layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-		layoutInfo.bindingCount = 1;
-		layoutInfo.pBindings = &uboLayoutBinding;
-
-		VkResult createDesSetLayRes = vkCreateDescriptorSetLayout(m_Device, &layoutInfo, nullptr, &m_DescriptorSetLayout);
-		VULCANITE_CORE_ASSERT(createDesSetLayRes == VK_SUCCESS, "failed to create descriptor set layout!");
-	}
-
-	void VulkanContext::CreateGraphicsPipeline() {
-		std::vector<char> vertShaderCode;
-		std::vector<char> fragShaderCode;
-		VULCANITE_CORE_ASSERT(ReadFile("assets/spir_v/vert.spv", vertShaderCode), "Read assets/spir_v/vert.spv failed!");
-		VULCANITE_CORE_ASSERT(ReadFile("assets/spir_v/frag.spv", fragShaderCode), "Read assets/spir_v/frag.spv failed!");
-
-		VkShaderModule vertShaderModule = CreateShaderModule(vertShaderCode);
-		VkShaderModule fragShaderModule = CreateShaderModule(fragShaderCode);
-
-		VkPipelineShaderStageCreateInfo vertShaderStageInfo{};
-		vertShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-		vertShaderStageInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
-		vertShaderStageInfo.module = vertShaderModule;
-		vertShaderStageInfo.pName = "main";
-
-		VkPipelineShaderStageCreateInfo fragShaderStageInfo{};
-		fragShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-		fragShaderStageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-		fragShaderStageInfo.module = fragShaderModule;
-		fragShaderStageInfo.pName = "main";
-
-		VkPipelineShaderStageCreateInfo shaderStages[] = { vertShaderStageInfo,fragShaderStageInfo };
-		VkVertexInputBindingDescription bindingDescription = VulkanMesh::GetBindingDescription();
-		std::vector<VkVertexInputAttributeDescription> attributeDescriptions = VulkanMesh::GetAttributeDescriptions();
-
-		VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
-		vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-		vertexInputInfo.vertexBindingDescriptionCount = 1;
-		vertexInputInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(attributeDescriptions.size());
-		vertexInputInfo.pVertexBindingDescriptions = &bindingDescription;
-		vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions.data();
-
-		VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
-		inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;;
-		inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-		inputAssembly.primitiveRestartEnable = VK_FALSE;
-
-		VkPipelineViewportStateCreateInfo viewportState{};
-		viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-		viewportState.viewportCount = 1;
-		viewportState.scissorCount = 1;
-
-		VkPipelineRasterizationStateCreateInfo rasterizer{};
-		rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-		rasterizer.depthClampEnable = VK_FALSE;
-		rasterizer.rasterizerDiscardEnable = VK_FALSE;
-		rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
-		rasterizer.lineWidth = 1.0f;
-		rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
-		rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-		rasterizer.depthBiasEnable = VK_FALSE;
-
-		VkPipelineMultisampleStateCreateInfo multisampling{};
-		multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-		multisampling.sampleShadingEnable = VK_FALSE;
-		multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-
-		VkPipelineColorBlendAttachmentState colorBlendAttachment{};
-		colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
-			VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-		colorBlendAttachment.blendEnable = VK_FALSE;
-
-		VkPipelineColorBlendStateCreateInfo colorBlending{};
-		colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-		colorBlending.logicOpEnable = VK_FALSE;
-		colorBlending.logicOp = VK_LOGIC_OP_COPY;
-		colorBlending.attachmentCount = 1;
-		colorBlending.pAttachments = &colorBlendAttachment;
-		colorBlending.blendConstants[0] = 1.0f;
-		colorBlending.blendConstants[1] = 1.0f;
-		colorBlending.blendConstants[2] = 1.0f;
-		colorBlending.blendConstants[3] = 1.0f;
-
-		std::vector<VkDynamicState> dynamicStates = {
-			VK_DYNAMIC_STATE_VIEWPORT,
-			VK_DYNAMIC_STATE_SCISSOR
+	void VulkanContext::CreatePipeline() {
+		// 管线(着色器 + 顶点布局 + 固定功能状态 + 描述符布局)由 VulkanPipeline 拥有。
+		// 这里只描述"要什么样的管线",具体创建走平台无关工厂。
+		PipelineSpe spec;
+		spec.VertexShaderPath = "assets/spir_v/vert.spv";
+		spec.FragmentShaderPath = "assets/spir_v/frag.spv";
+		spec.Layout = BufferLayout{
+			VertexAttribute(ShaderDataType::Float2, "m_Pos"),
+			VertexAttribute(ShaderDataType::Float3, "m_Color")
 		};
-		VkPipelineDynamicStateCreateInfo dynamicState{};
-		dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-		dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
-		dynamicState.pDynamicStates = dynamicStates.data();
+		spec.Topology = PrimitiveTopology::TriangleList;
+		spec.Cull = CullMode::Back;
+		spec.Face = FrontFace::CounterClockwise;
+		spec.Polygon = PolygonMode::Fill;
+		spec.Blend = BlendMode::None;
+		spec.SampleCount = 1;
 
-		VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
-		pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-		pipelineLayoutInfo.setLayoutCount = 1;
-		pipelineLayoutInfo.pSetLayouts = &m_DescriptorSetLayout;
+		// 平台层内部直接构造具体类型;上层想建管线时走 Pipeline::CreatePipeline(spec)
+		m_Pipeline = CreateRef<VulkanPipeline>(spec);
+		VULCANITE_CORE_ASSERT(m_Pipeline != nullptr && m_Pipeline->IsValid(), "failed to create graphics pipeline!");
+		if (m_Pipeline == nullptr || !m_Pipeline->IsValid()) {
+			m_Pipeline.reset();
+			return;
+		}
 
-		VkResult createPipLayoutRes = vkCreatePipelineLayout(m_Device, &pipelineLayoutInfo, nullptr, &m_PipelineLayout);
-		VULCANITE_CORE_ASSERT(createPipLayoutRes == VK_SUCCESS, "failed to create pipeline layout!");
-
-		VkGraphicsPipelineCreateInfo pipelineInfo{};
-		pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-		pipelineInfo.stageCount = 2;
-		pipelineInfo.pStages = shaderStages;
-		pipelineInfo.pVertexInputState = &vertexInputInfo;
-		pipelineInfo.pInputAssemblyState = &inputAssembly;
-		pipelineInfo.pViewportState = &viewportState;
-		pipelineInfo.pRasterizationState = &rasterizer;
-		pipelineInfo.pMultisampleState = &multisampling;
-		pipelineInfo.pColorBlendState = &colorBlending;
-		pipelineInfo.pDynamicState = &dynamicState;
-		pipelineInfo.layout = m_PipelineLayout;
-		pipelineInfo.renderPass = m_RenderPass;
-		pipelineInfo.subpass = 0;
-		pipelineInfo.basePipelineHandle = VK_NULL_HANDLE;
-
-		VkResult createGrapPipeline = vkCreateGraphicsPipelines(m_Device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_GraphicsPipeline);
-		VULCANITE_CORE_ASSERT(createGrapPipeline == VK_SUCCESS, "failed to create graphics pipeline!");
-
-		vkDestroyShaderModule(m_Device, vertShaderModule, nullptr);
-		vkDestroyShaderModule(m_Device, fragShaderModule, nullptr);
-	}
-
-	VkShaderModule VulkanContext::CreateShaderModule(const std::vector<char>& code) {
-		VkShaderModuleCreateInfo createInfo{};
-		createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-		createInfo.codeSize = code.size();
-		createInfo.pCode = reinterpret_cast<const uint32_t*>(code.data());
-
-		VkShaderModule shaderModule;
-		VkResult createShaderMod = vkCreateShaderModule(m_Device, &createInfo, nullptr, &shaderModule);
-		VULCANITE_CORE_ASSERT(createShaderMod == VK_SUCCESS, "failed to create shader module!");
-
-		return shaderModule;
+		VULCANITE_CORE_INFO("Graphics pipeline created: {0} + {1}, vertex stride {2} bytes",
+			spec.VertexShaderPath, spec.FragmentShaderPath, spec.Layout.GetStride());
 	}
 
 	void VulkanContext::CreateCommandPool() {
@@ -797,7 +679,16 @@ namespace Vulcanite {
 	}
 
 	void VulkanContext::CreateDescriptorSets() {
-		std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, m_DescriptorSetLayout);
+		// 描述符布局归管线所有(它是管线的一部分),这里向它要
+		VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
+		if (m_Pipeline != nullptr) {
+			descriptorSetLayout = m_Pipeline->GetDescriptorSetLayout();
+		}
+		VULCANITE_CORE_ASSERT(descriptorSetLayout != VK_NULL_HANDLE, "descriptor set layout 不可用!");
+		if (descriptorSetLayout == VK_NULL_HANDLE) {
+			return;
+		}
+		std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, descriptorSetLayout);
 		VkDescriptorSetAllocateInfo allocInfo{};
 		allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
 		allocInfo.descriptorPool = m_DescriptorPool;
@@ -870,7 +761,16 @@ namespace Vulcanite {
 	}
 
 	void VulkanContext::CreateDynamicBuffers() {
-		const VkDeviceSize vertexBytes = static_cast<VkDeviceSize>(MAX_DYNAMIC_VERTICES) * sizeof(Vertex);
+		// 顶点大小来自管线 spec 的布局(单一真相),不再依赖 Vertex 结构体
+		const VkDeviceSize vertexStride = m_Pipeline != nullptr
+			? static_cast<VkDeviceSize>(m_Pipeline->GetSpec().Layout.GetStride())
+			: 0;
+		VULCANITE_CORE_ASSERT(vertexStride > 0, "管线布局不可用,无法确定顶点大小!");
+		if (vertexStride == 0) {
+			return;
+		}
+
+		const VkDeviceSize vertexBytes = static_cast<VkDeviceSize>(MAX_DYNAMIC_VERTICES) * vertexStride;
 		const VkDeviceSize indexBytes = static_cast<VkDeviceSize>(MAX_DYNAMIC_INDICES) * sizeof(uint32_t);
 
 		m_DynamicVertexCapacityBytes = vertexBytes;
@@ -973,6 +873,18 @@ namespace Vulcanite {
 		return m_DynamicIndexCounts[static_cast<size_t>(m_CurrentFrame)];
 	}
 
+	VkDevice VulkanContext::GetDevice() const {
+		return m_Device;
+	}
+
+	VkRenderPass VulkanContext::GetRenderPass() const {
+		return m_RenderPass;
+	}
+
+	VkCommandBuffer VulkanContext::GetCurrentCommandBuffer() const {
+		return m_CurrentCommandBuffer;
+	}
+
 	VkResult VulkanContext::CreateDebugUtilsMessengerEXT(
 		VkInstance instance,
 		const VkDebugUtilsMessengerCreateInfoEXT* pCreateInfo,
@@ -1060,6 +972,8 @@ namespace Vulcanite {
 	}
 
 	void VulkanContext::RecordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex) {
+		m_CurrentCommandBuffer = commandBuffer;
+
 		VkCommandBufferBeginInfo beginInfo{};
 		beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 
@@ -1079,7 +993,13 @@ namespace Vulcanite {
 
 		vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-		vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_GraphicsPipeline);
+		// 管线由 VulkanPipeline 绑定(它内部取 m_CurrentCommandBuffer)。
+		// 这里不能 return:已经在录制命令缓冲,提前返回会留下没有 vkCmdEndCommandBuffer 的半成品。
+		const bool pipelineReady = m_Pipeline != nullptr && m_Pipeline->IsValid();
+		VULCANITE_CORE_ASSERT(pipelineReady, "管线尚未创建成功!");
+		if (pipelineReady) {
+			m_Pipeline->Bind();
+		}
 
 		VkViewport viewport{};
 		viewport.x = 0.0f;
@@ -1103,10 +1023,12 @@ namespace Vulcanite {
 		VkBuffer ib = GetDynamicIndexBuffer();
 		vkCmdBindIndexBuffer(commandBuffer, ib, 0, VK_INDEX_TYPE_UINT32);
 
-		vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-			m_PipelineLayout, 0, 1, &m_DescriptorSets[m_CurrentFrame], 0, nullptr);
+		if (pipelineReady) {
+			// 描述符集的绑定是后端细节,由 VulkanPipeline 内部取 m_PipelineLayout 完成
+			m_Pipeline->BindDescriptorSet(commandBuffer, m_DescriptorSets[m_CurrentFrame], 0);
 
-		vkCmdDrawIndexed(commandBuffer, GetDynamicIndexCount(), 1, 0, 0, 0);
+			vkCmdDrawIndexed(commandBuffer, GetDynamicIndexCount(), 1, 0, 0, 0);
+		}
 
 		vkCmdEndRenderPass(commandBuffer);
 
