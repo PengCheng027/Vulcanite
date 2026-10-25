@@ -45,7 +45,8 @@ find_package(Vulkan REQUIRED)
 #  着色器:源码收集 + 随构建自动编译(glslc)
 #    源码目录:Vulcanite/assets/shader
 #    输出目录:Vulcanite/assets/spir_v
-#    命名映射:*.vert -> vert.spv   *.frag -> frag.spv   其他 -> <文件名>.spv
+#    命名映射:<文件名>.<扩展名>.spv(按完整文件名,保证多套着色器不互相覆盖)
+#    例:shader_base.vert -> shader_base.vert.spv   shader_alt.frag -> shader_alt.frag.spv
 #  源码未变化时 glslc 不会重复执行(由 DEPENDS 驱动增量)
 # ============================================================================
 set(SHADER_SRC_DIR ${CMAKE_SOURCE_DIR}/Vulcanite/assets/shader)
@@ -75,20 +76,16 @@ set(SHADER_SPV_OUTPUTS "")
 foreach(SHADER_SRC ${VULCANITE_SHADERS})
     get_filename_component(SHADER_EXT  ${SHADER_SRC} EXT)
     get_filename_component(SHADER_NAME ${SHADER_SRC} NAME_WE)
+    get_filename_component(SHADER_FILE ${SHADER_SRC} NAME)
 
-    if(SHADER_EXT STREQUAL ".vert")
-        set(SHADER_SPV ${SHADER_OUT_DIR}/vert.spv)
-    elseif(SHADER_EXT STREQUAL ".frag")
-        set(SHADER_SPV ${SHADER_OUT_DIR}/frag.spv)
-    else()
-        set(SHADER_SPV ${SHADER_OUT_DIR}/${SHADER_NAME}.spv)
-    endif()
+    # 输出名 = 源文件名 + ".spv":shader_base.vert -> shader_base.vert.spv
+    set(SHADER_SPV ${SHADER_OUT_DIR}/${SHADER_FILE}.spv)
 
     add_custom_command(
         OUTPUT  ${SHADER_SPV}
         COMMAND ${GLSLC_EXECUTABLE} ${SHADER_SRC} -o ${SHADER_SPV}
         DEPENDS ${SHADER_SRC}
-        COMMENT "Compiling shader: ${SHADER_NAME}${SHADER_EXT}"
+        COMMENT "Compiling shader: ${SHADER_FILE}"
         VERBATIM
     )
     list(APPEND SHADER_SPV_OUTPUTS ${SHADER_SPV})

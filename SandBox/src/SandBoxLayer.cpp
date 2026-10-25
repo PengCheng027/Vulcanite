@@ -3,6 +3,8 @@
 #include <glm/gtc/matrix_transform.hpp>
 
 #include "Core/VulLog.h"
+#include "Renderer/Pipeline.h"
+#include "Renderer/RenderCommand.h"
 #include "Renderer/Renderer2D.h"
 
 #include "SandBoxLayer.h"
@@ -27,6 +29,13 @@ namespace {
 		}
 		return { r, g, b };
 	}
+
+	// 三次 Bézier 求值(演示:曲线只是折线的一种来源)
+	glm::vec3 BezierPoint(const glm::vec3& p0, const glm::vec3& p1,
+		const glm::vec3& p2, const glm::vec3& p3, float t) {
+		const float u = 1.0f - t;
+		return u * u * u * p0 + 3.0f * u * u * t * p1 + 3.0f * u * t * t * p2 + t * t * t * p3;
+	}
 }
 
 namespace Vulcanite {
@@ -39,9 +48,46 @@ namespace Vulcanite {
 
 	void SandBoxLayer::OnAttach() {
 		VULCANITE_CLIENT_INFO("SandBoxLayer attached");
+
+		// ===== 演示一:管线来自应用层,不碰 Vulkan =====
+		// 与默认管线同顶点布局(Float2 + Float3 = 20 字节),只换成"反色 + 棋盘"的片元着色器。
+		PipelineSpe altSpec;
+		altSpec.VertexShaderPath = "assets/spir_v/shader_base.vert.spv";
+		altSpec.FragmentShaderPath = "assets/spir_v/shader_alt.frag.spv";
+		altSpec.Layout = BufferLayout{
+			VertexAttribute(ShaderDataType::Float2, "m_Pos"),
+			VertexAttribute(ShaderDataType::Float3, "m_Color")
+		};
+		altSpec.SampleCount = 1;
+
+		m_AltPipeline = Pipeline::CreatePipeline(altSpec);
+
+		VULCANITE_CLIENT_INFO("Second pipeline (same layout, alt fragment): {0}",
+			m_AltPipeline != nullptr ? "created" : "FAILED");
+
+		// ===== 演示二:不同的顶点布局 =====
+		// 只有位置(2 个 float = 8 字节),没有颜色属性;着色器也从顶点取位置、片元输出固定颜色。
+		// 这条管线与上面两条的 stride 不同,验证动态缓冲的"按字节追加"确实支持混合布局。
+		PipelineSpe posOnlySpec;
+		posOnlySpec.VertexShaderPath = "assets/spir_v/shader_posonly.vert.spv";
+		posOnlySpec.FragmentShaderPath = "assets/spir_v/shader_posonly.frag.spv";
+		posOnlySpec.Layout = BufferLayout{
+			VertexAttribute(ShaderDataType::Float2, "m_Pos")
+		};
+		posOnlySpec.Topology = PrimitiveTopology::LineList;
+		posOnlySpec.SampleCount = 1;
+
+		m_PosOnlyPipeline = Pipeline::CreatePipeline(posOnlySpec);
+
+		VULCANITE_CLIENT_INFO("Third pipeline (pos-only layout, stride 8): {0}",
+			m_PosOnlyPipeline != nullptr ? "created" : "FAILED");
 	}
 
 	void SandBoxLayer::OnDetach() {
+		// 主动释放自己持有的管线引用:让资源在"窗口/设备销毁之前"按明确顺序归还,
+		// 而不是依赖成员析构顺序。
+		m_AltPipeline = nullptr;
+		m_PosOnlyPipeline = nullptr;
 		VULCANITE_CLIENT_INFO("SandBoxLayer detached");
 	}
 
@@ -56,14 +102,23 @@ namespace Vulcanite {
 
 		Renderer2D::BeginSence(viewProject);
 
+		// 先画折线/曲线:它们和下面的 quad 落在同一个批里(同管线、同布局、同一次绘制)
+		DrawDemoPolylines();
+
 		// quad 默认是 1×1 世界单位,而网格间距只有 0.09:
 		// 缩小到 0.08×0.08,让 400 个矩形彼此分开(否则会糊成一片)
 		glm::mat4 transform = glm::scale(glm::mat4(1.0f), glm::vec3(0.08f));
 
 		// 20×20 网格,色相沿对角线递进 → 彩虹斜条纹
 		// 正交可见范围:x ∈ [-1.78, 1.78], y ∈ [-1, 1]
-		for (int y = 0; y < 20; y++) {
-			for (int x = 0; x < 20; x++) {
+		for (int x = 0; x < 20; x++) {
+			for (int y = 0; y < 20; y++) {
+				// 第 10 列起换用第二条管线:Renderer2D 会在切换处先结算当前批,
+				// 于是本帧变成两条绘制命令(左右两半各一条)。
+				if (x == 10) {
+					Renderer2D::SetPipeline(m_AltPipeline);
+				}
+
 				float fx = -0.9f + x * 0.09f;
 				float fy = -0.9f + y * 0.09f;
 
@@ -75,6 +130,42 @@ namespace Vulcanite {
 		}
 
 		Renderer2D::EndSence();
+
+		// ===== 演示二:用"不同顶点布局"的管线画一个三角形 =====
+		// 顶点只有 vec2 位置(8 字节),由 RenderCommand::DrawRaw 直接提交;
+		// 它和上面的彩虹网格共用同一份动态缓冲,只是起点字节偏移不同。
+		
+	}
+
+	void SandBoxLayer::DrawDemoPolylines() {
+		// ===== 演示:折线 / 曲线轮廓进入 Renderer2D 的批 =====
+		// 内部按"有宽度的三角形条带"展开,和 quad 共用同一个批/管线/一次 draw call。
+
+		// 1) 闭合折线:三角形轮廓(3 个点 → 3 段 → 18 个索引)
+		const glm::vec3 triangle[3] = {
+			{ -1.60f,  0.30f, 0.0f },
+			{ -1.10f,  0.30f, 0.0f },
+			{ -1.35f, -0.05f, 0.0f },
+		};
+		Renderer2D::DrawPolyline(triangle, 3, 0.02f, { 1.0f, 1.0f, 1.0f, 1.0f }, true);
+
+		// 2) 三次 Bézier 曲线:采样成 49 个点 → 48 段(曲线只是折线的一种来源)
+		const glm::vec3 c0{ -1.70f, -0.45f, 0.0f };
+		const glm::vec3 c1{ -1.50f,  0.10f, 0.0f };
+		const glm::vec3 c2{ -1.25f, -0.95f, 0.0f };
+		const glm::vec3 c3{ -1.00f, -0.45f, 0.0f };
+
+		const int segments = 48;
+		glm::vec3 curve[segments + 1];
+		for (int i = 0; i <= segments; ++i) {
+			curve[i] = BezierPoint(c0, c1, c2, c3, static_cast<float>(i) / static_cast<float>(segments));
+		}
+		Renderer2D::DrawPolyline(curve, static_cast<uint32_t>(segments + 1), 0.02f,
+			{ 0.2f, 0.9f, 1.0f, 1.0f }, false);
+
+		// 3) 单段线:一条横线
+		Renderer2D::DrawLine({ -1.70f, -0.70f, 0.0f }, { -1.00f, -0.70f, 0.0f }, 0.01f,
+			{ 1.0f, 0.5f, 0.1f, 1.0f });
 	}
 
 	void SandBoxLayer::OnEvent(Event& e) {

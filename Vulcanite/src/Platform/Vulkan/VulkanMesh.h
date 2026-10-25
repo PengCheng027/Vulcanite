@@ -21,6 +21,13 @@ namespace Vulcanite {
 		void SetIndexDatas(uint32_t* ipIndexes, uint32_t indexCount) override;
 		void SetVertexDatas(Vertex* ipVertexes, uint32_t vertexCount) override;
 
+		// ===== 批处理写入(直接写进 m_Vertices / m_Indices)=====
+		uint32_t GetVertexCapacity() const override;
+		uint32_t GetIndexCapacity() const override;
+		uint32_t AppendVertex(const Vertex& vertex) override;
+		bool AppendIndices(const uint32_t* indices, uint32_t indexCount) override;
+		void ResetGeometry() override;
+
 		static VkVertexInputBindingDescription GetBindingDescription();
 		static std::vector<VkVertexInputAttributeDescription> GetAttributeDescriptions();
 	private:

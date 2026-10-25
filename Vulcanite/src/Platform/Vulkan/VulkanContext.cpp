@@ -39,8 +39,10 @@ namespace Vulcanite {
 		}
 
 		vkDestroyDescriptorPool(m_Device, m_DescriptorPool, nullptr);
-		// 描述符池里的 set 先释放,再销毁管线(管线持有 descriptor set layout)
-		m_Pipeline.reset();
+		// 描述符池先释放,再销毁它依赖的帧级布局
+		// (管线归 Renderer2D 所有,已在 Renderer::ShutDown 阶段释放)
+		vkDestroyDescriptorSetLayout(m_Device, m_FrameDescriptorSetLayout, nullptr);
+		m_FrameDescriptorSetLayout = VK_NULL_HANDLE;
 
 		for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
 			vkDestroySemaphore(m_Device, m_ImageAvailableSemaphores[i], nullptr);
@@ -81,7 +83,7 @@ namespace Vulcanite {
 		CreateSwapChain();
 		CreateImageViews();
 		CreateRenderPass();
-		CreatePipeline();
+		CreateFrameDescriptorSetLayout();   // 帧级布局必须在描述符池/集之前
 		CreateFramebuffers();
 		CreateCommandPool();
 		CreateUniformBuffers();
@@ -510,33 +512,27 @@ namespace Vulcanite {
 		
 	}
 
-	void VulkanContext::CreatePipeline() {
-		// 管线(着色器 + 顶点布局 + 固定功能状态 + 描述符布局)由 VulkanPipeline 拥有。
-		// 这里只描述"要什么样的管线",具体创建走平台无关工厂。
-		PipelineSpe spec;
-		spec.VertexShaderPath = "assets/spir_v/vert.spv";
-		spec.FragmentShaderPath = "assets/spir_v/frag.spv";
-		spec.Layout = BufferLayout{
-			VertexAttribute(ShaderDataType::Float2, "m_Pos"),
-			VertexAttribute(ShaderDataType::Float3, "m_Color")
-		};
-		spec.Topology = PrimitiveTopology::TriangleList;
-		spec.Cull = CullMode::Back;
-		spec.Face = FrontFace::CounterClockwise;
-		spec.Polygon = PolygonMode::Fill;
-		spec.Blend = BlendMode::None;
-		spec.SampleCount = 1;
+	void VulkanContext::CreateFrameDescriptorSetLayout() {
+		// 帧级绑定:binding 0 = 相机 UBO(顶点 + 片元阶段都能读)。
+		// 这里的定义必须与 PipelineSpe::DefaultFrameBindings() 保持一致 —— 两边定义相同,
+		// 任何使用默认绑定的管线都能直接使用上下文分配的这份描述符集(不要求同一个 layout 对象)。
+		VkDescriptorSetLayoutBinding uboBinding{};
+		uboBinding.binding = 0;
+		uboBinding.descriptorCount = 1;
+		uboBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		uboBinding.pImmutableSamplers = nullptr;
+		uboBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 
-		// 平台层内部直接构造具体类型;上层想建管线时走 Pipeline::CreatePipeline(spec)
-		m_Pipeline = CreateRef<VulkanPipeline>(spec);
-		VULCANITE_CORE_ASSERT(m_Pipeline != nullptr && m_Pipeline->IsValid(), "failed to create graphics pipeline!");
-		if (m_Pipeline == nullptr || !m_Pipeline->IsValid()) {
-			m_Pipeline.reset();
-			return;
+		VkDescriptorSetLayoutCreateInfo layoutInfo{};
+		layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+		layoutInfo.bindingCount = 1;
+		layoutInfo.pBindings = &uboBinding;
+
+		VkResult result = vkCreateDescriptorSetLayout(m_Device, &layoutInfo, nullptr, &m_FrameDescriptorSetLayout);
+		VULCANITE_CORE_ASSERT(result == VK_SUCCESS, "failed to create frame descriptor set layout!");
+		if (result != VK_SUCCESS) {
+			m_FrameDescriptorSetLayout = VK_NULL_HANDLE;
 		}
-
-		VULCANITE_CORE_INFO("Graphics pipeline created: {0} + {1}, vertex stride {2} bytes",
-			spec.VertexShaderPath, spec.FragmentShaderPath, spec.Layout.GetStride());
 	}
 
 	void VulkanContext::CreateCommandPool() {
@@ -679,16 +675,12 @@ namespace Vulcanite {
 	}
 
 	void VulkanContext::CreateDescriptorSets() {
-		// 描述符布局归管线所有(它是管线的一部分),这里向它要
-		VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
-		if (m_Pipeline != nullptr) {
-			descriptorSetLayout = m_Pipeline->GetDescriptorSetLayout();
-		}
-		VULCANITE_CORE_ASSERT(descriptorSetLayout != VK_NULL_HANDLE, "descriptor set layout 不可用!");
-		if (descriptorSetLayout == VK_NULL_HANDLE) {
+		// 帧级布局由上下文自己拥有(不再向管线要):管线只是"引用"同一定义的布局。
+		VULCANITE_CORE_ASSERT(m_FrameDescriptorSetLayout != VK_NULL_HANDLE, "帧描述符布局尚未创建!");
+		if (m_FrameDescriptorSetLayout == VK_NULL_HANDLE) {
 			return;
 		}
-		std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, descriptorSetLayout);
+		std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, m_FrameDescriptorSetLayout);
 		VkDescriptorSetAllocateInfo allocInfo{};
 		allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
 		allocInfo.descriptorPool = m_DescriptorPool;
@@ -761,16 +753,9 @@ namespace Vulcanite {
 	}
 
 	void VulkanContext::CreateDynamicBuffers() {
-		// 顶点大小来自管线 spec 的布局(单一真相),不再依赖 Vertex 结构体
-		const VkDeviceSize vertexStride = m_Pipeline != nullptr
-			? static_cast<VkDeviceSize>(m_Pipeline->GetSpec().Layout.GetStride())
-			: 0;
-		VULCANITE_CORE_ASSERT(vertexStride > 0, "管线布局不可用,无法确定顶点大小!");
-		if (vertexStride == 0) {
-			return;
-		}
-
-		const VkDeviceSize vertexBytes = static_cast<VkDeviceSize>(MAX_DYNAMIC_VERTICES) * vertexStride;
+		// 顶点缓冲按**字节竞技场**使用:不再假设单一 stride,
+		// 因此可以同时容纳不同顶点布局(位置+颜色、只有位置、带 UV……)的几何。
+		const VkDeviceSize vertexBytes = static_cast<VkDeviceSize>(MAX_DYNAMIC_VERTEX_BYTES);
 		const VkDeviceSize indexBytes = static_cast<VkDeviceSize>(MAX_DYNAMIC_INDICES) * sizeof(uint32_t);
 
 		m_DynamicVertexCapacityBytes = vertexBytes;
@@ -783,7 +768,9 @@ namespace Vulcanite {
 		m_DynamicIndexBuffers.resize(frameCount);
 		m_DynamicIndexMemory.resize(frameCount);
 		m_DynamicIndexMapped.resize(frameCount);
+		m_DynamicVertexBytesUsed.assign(frameCount, 0);
 		m_DynamicIndexCounts.assign(frameCount, 0);
+		m_DrawCommands.clear();
 
 		// CPU 可直接写入的内存类型;HOST_COHERENT 保证 memcpy 后 GPU 立即可见(无需手动 flush)
 		const VkMemoryPropertyFlags hostFlags =
@@ -803,8 +790,8 @@ namespace Vulcanite {
 			VULCANITE_CORE_ASSERT(mapIRes == VK_SUCCESS, "failed to map dynamic index buffer!");
 		}
 
-		VULCANITE_CORE_INFO("Dynamic batch buffers ready: capacity {0} vertices / {1} indices per frame, {2} frames",
-			MAX_DYNAMIC_VERTICES, MAX_DYNAMIC_INDICES, frameCount);
+		VULCANITE_CORE_INFO("Dynamic batch buffers ready: {0} KiB vertex bytes / {1} indices per frame, {2} frames",
+			MAX_DYNAMIC_VERTEX_BYTES / 1024, MAX_DYNAMIC_INDICES, frameCount);
 	}
 
 	void VulkanContext::DestroyDynamicBuffers() {
@@ -829,26 +816,62 @@ namespace Vulcanite {
 		m_DynamicIndexCounts.clear();
 	}
 
-	bool VulkanContext::UploadDynamicGeometry(const void* vertexData, VkDeviceSize vertexBytes,
-		const void* indexData, VkDeviceSize indexBytes) {
+	bool VulkanContext::AppendDynamicGeometry(const void* vertexData, VkDeviceSize vertexBytes,
+		const void* indexData, VkDeviceSize indexBytes,
+		uint32_t& outVertexByteOffset, uint32_t& outFirstIndex) {
 
-		// 容量校验:超出则拒绝写入,避免越界覆写映射内存
-		if (vertexBytes > m_DynamicVertexCapacityBytes || indexBytes > m_DynamicIndexCapacityBytes) {
-			VULCANITE_CORE_ERROR("Dynamic geometry exceeds capacity: vertices {0}/{1} bytes, indices {2}/{3} bytes",
-				vertexBytes, m_DynamicVertexCapacityBytes, indexBytes, m_DynamicIndexCapacityBytes);
+		outVertexByteOffset = 0;
+		outFirstIndex = 0;
+
+		const size_t frame = static_cast<size_t>(m_CurrentFrame);
+		if (frame >= m_DynamicVertexBytesUsed.size() || frame >= m_DynamicIndexCounts.size()) {
 			return false;
 		}
 
-		const size_t frame = static_cast<size_t>(m_CurrentFrame);
+		// 追加位置 = 本帧已经写入的量(同一份缓冲被本帧所有绘制共用)
+		const VkDeviceSize usedVertexBytes = static_cast<VkDeviceSize>(m_DynamicVertexBytesUsed[frame]);
+		const VkDeviceSize usedIndexBytes =
+			static_cast<VkDeviceSize>(m_DynamicIndexCounts[frame]) * sizeof(uint32_t);
+
+		// 容量校验:超出则拒绝写入,避免越界覆写映射内存
+		if (usedVertexBytes + vertexBytes > m_DynamicVertexCapacityBytes ||
+			usedIndexBytes + indexBytes > m_DynamicIndexCapacityBytes) {
+			VULCANITE_CORE_ERROR("Dynamic geometry exceeds capacity: vertex {0}+{1}/{2} bytes, index {3}+{4}/{5} bytes",
+				usedVertexBytes, vertexBytes, m_DynamicVertexCapacityBytes,
+				usedIndexBytes, indexBytes, m_DynamicIndexCapacityBytes);
+			return false;
+		}
 
 		// host-coherent 内存:memcpy 后 GPU 立即可见,无需 vkFlushMappedMemoryRanges
-		if (vertexData != nullptr && vertexBytes > 0)
-			memcpy(m_DynamicVertexMapped[frame], vertexData, static_cast<size_t>(vertexBytes));
-		if (indexData != nullptr && indexBytes > 0)
-			memcpy(m_DynamicIndexMapped[frame], indexData, static_cast<size_t>(indexBytes));
+		if (vertexData != nullptr && vertexBytes > 0) {
+			memcpy(static_cast<char*>(m_DynamicVertexMapped[frame]) + usedVertexBytes,
+				vertexData, static_cast<size_t>(vertexBytes));
+		}
+		if (indexData != nullptr && indexBytes > 0) {
+			memcpy(static_cast<char*>(m_DynamicIndexMapped[frame]) + usedIndexBytes,
+				indexData, static_cast<size_t>(indexBytes));
+		}
 
-		m_DynamicIndexCounts[frame] = static_cast<uint32_t>(indexBytes / sizeof(uint32_t));
+		// 本批的起点:顶点缓冲的**字节**偏移 + 索引起点。
+		// 用字节偏移而不是顶点序号,是因为不同布局的 stride 不同,顶点序号无法跨布局通用。
+		outVertexByteOffset = m_DynamicVertexBytesUsed[frame];
+		outFirstIndex = m_DynamicIndexCounts[frame];
+
+		m_DynamicVertexBytesUsed[frame] += static_cast<uint32_t>(vertexBytes);
+		m_DynamicIndexCounts[frame] += static_cast<uint32_t>(indexBytes / sizeof(uint32_t));
 		return true;
+	}
+
+	void VulkanContext::PushDrawCommand(const DrawCommand& command) {
+		m_DrawCommands.push_back(command);
+	}
+
+	void VulkanContext::ClearDrawCommands() {
+		m_DrawCommands.clear();
+	}
+
+	const std::vector<DrawCommand>& VulkanContext::GetDrawCommands() const {
+		return m_DrawCommands;
 	}
 
 	void VulkanContext::SetUniBufferObject(const UniformBufferObject& uniBufferObject) {
@@ -865,12 +888,6 @@ namespace Vulcanite {
 		if (m_DynamicIndexBuffers.empty())
 			return VK_NULL_HANDLE;
 		return m_DynamicIndexBuffers[static_cast<size_t>(m_CurrentFrame)];
-	}
-
-	uint32_t VulkanContext::GetDynamicIndexCount() const {
-		if (m_DynamicIndexCounts.empty())
-			return 0;
-		return m_DynamicIndexCounts[static_cast<size_t>(m_CurrentFrame)];
 	}
 
 	VkDevice VulkanContext::GetDevice() const {
@@ -993,14 +1010,6 @@ namespace Vulcanite {
 
 		vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-		// 管线由 VulkanPipeline 绑定(它内部取 m_CurrentCommandBuffer)。
-		// 这里不能 return:已经在录制命令缓冲,提前返回会留下没有 vkCmdEndCommandBuffer 的半成品。
-		const bool pipelineReady = m_Pipeline != nullptr && m_Pipeline->IsValid();
-		VULCANITE_CORE_ASSERT(pipelineReady, "管线尚未创建成功!");
-		if (pipelineReady) {
-			m_Pipeline->Bind();
-		}
-
 		VkViewport viewport{};
 		viewport.x = 0.0f;
 		viewport.y = 0.0f;
@@ -1015,19 +1024,58 @@ namespace Vulcanite {
 		scissor.extent = m_SwapChainExtent;
 		vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
-		VkBuffer vb = GetDynamicVertexBuffer();
-		VkBuffer vertexBuffers[] = { vb };
-		VkDeviceSize offsets[] = { 0 };
-		vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
-
+		// 索引缓冲整帧共用,绑一次即可(每条命令用 FirstIndex 指向自己的区间)
 		VkBuffer ib = GetDynamicIndexBuffer();
 		vkCmdBindIndexBuffer(commandBuffer, ib, 0, VK_INDEX_TYPE_UINT32);
 
-		if (pipelineReady) {
-			// 描述符集的绑定是后端细节,由 VulkanPipeline 内部取 m_PipelineLayout 完成
-			m_Pipeline->BindDescriptorSet(commandBuffer, m_DescriptorSets[m_CurrentFrame], 0);
+		VkBuffer vb = GetDynamicVertexBuffer();
 
-			vkCmdDrawIndexed(commandBuffer, GetDynamicIndexCount(), 1, 0, 0, 0);
+		// 逐条执行本帧的绘制命令 —— 命令自带管线,这就是"不同网格/不同布局用不同管线"的入口
+		static int s_LoggedFrames = 0;
+		const bool logThisFrame = s_LoggedFrames < 2;   // 只打前两帧:第 1 帧 + 稳态
+
+		uint32_t drawnCommands = 0;
+		uint32_t totalIndices = 0;
+		std::string perCommandIndices;   // 日志用:每条命令画了多少索引
+
+		for (const DrawCommand& command : m_DrawCommands) {
+			if (command.Pipeline == nullptr || command.IndexCount == 0) {
+				continue;
+			}
+
+			// 1) 绑定本条命令自己的管线
+			command.Pipeline->Bind();
+
+			// 2) 绑定本帧的相机 UBO 描述符集。
+			//    需要具体类型才能拿到 pipeline layout —— 转型只发生在 Platform/Vulkan 内部,
+			//    因为所有管线共用同一份布局定义,这份描述符集对它们都兼容。
+			VulkanPipeline* vulkanPipeline = dynamic_cast<VulkanPipeline*>(command.Pipeline.get());
+			VULCANITE_CORE_ASSERT(vulkanPipeline != nullptr, "DrawCommand 里的管线不是 Vulkan 实现!");
+			if (vulkanPipeline == nullptr) {
+				continue;
+			}
+			vulkanPipeline->BindDescriptorSet(commandBuffer, m_DescriptorSets[m_CurrentFrame], 0);
+
+			// 3) 顶点缓冲按本批的**字节偏移**绑定:不同布局(stride)因此可以共存于同一份缓冲
+			VkDeviceSize vertexByteOffset = command.VertexByteOffset;
+			vkCmdBindVertexBuffers(commandBuffer, 0, 1, &vb, &vertexByteOffset);
+
+			// 4) 绘制:顶点偏移已经体现在缓冲绑定里,这里 vertexOffset 保持 0
+			vkCmdDrawIndexed(commandBuffer, command.IndexCount, 1, command.FirstIndex, 0, 0);
+
+			drawnCommands++;
+			totalIndices += command.IndexCount;
+
+			if (logThisFrame) {
+				if (!perCommandIndices.empty()) perCommandIndices += ", ";
+				perCommandIndices += std::to_string(command.IndexCount);
+			}
+		}
+
+		if (logThisFrame) {
+			s_LoggedFrames++;
+			VULCANITE_CORE_INFO("Frame {0}: {1} draw command(s), {2} indices total [per command: {3}]",
+				s_LoggedFrames, drawnCommands, totalIndices, perCommandIndices);
 		}
 
 		vkCmdEndRenderPass(commandBuffer);
@@ -1098,6 +1146,13 @@ namespace Vulcanite {
 			return;
 		}
 		VULCANITE_CORE_ASSERT(presentRes == VK_SUCCESS, "failed to present swap chain image!");
+
+		// 本帧的绘制命令与追加游标都归零,下一帧重新收集
+		m_DrawCommands.clear();
+		if (!m_DynamicVertexBytesUsed.empty()) {
+			m_DynamicVertexBytesUsed[static_cast<size_t>(m_CurrentFrame)] = 0;
+			m_DynamicIndexCounts[static_cast<size_t>(m_CurrentFrame)] = 0;
+		}
 
 		m_CurrentFrame = (m_CurrentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 	}

@@ -95,6 +95,21 @@ namespace {
 		out.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
 		out.alphaBlendOp = VK_BLEND_OP_ADD;
 	}
+
+	VkShaderStageFlags ToVkShaderStage(Vulcanite::ShaderStage stage) {
+		VkShaderStageFlags flags = 0;
+		if (Vulcanite::HasShaderStage(stage, Vulcanite::ShaderStage::Vertex))   flags |= VK_SHADER_STAGE_VERTEX_BIT;
+		if (Vulcanite::HasShaderStage(stage, Vulcanite::ShaderStage::Fragment)) flags |= VK_SHADER_STAGE_FRAGMENT_BIT;
+		return flags;
+	}
+
+	VkDescriptorType ToVkDescriptorType(Vulcanite::DescriptorType type) {
+		switch (type) {
+			case Vulcanite::DescriptorType::UniformBuffer: return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+			case Vulcanite::DescriptorType::Texture2D:     return VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+		}
+		return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+	}
 }
 
 namespace Vulcanite {
@@ -164,18 +179,27 @@ namespace Vulcanite {
 	}
 
 	void VulkanPipeline::CreateDescriptorSetLayout() {
-		// 目前只有一个描述符:binding 0 的 UBO(顶点阶段使用)
-		VkDescriptorSetLayoutBinding uboLayoutBinding{};
-		uboLayoutBinding.binding = 0;
-		uboLayoutBinding.descriptorCount = 1;
-		uboLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-		uboLayoutBinding.pImmutableSamplers = nullptr;
-		uboLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+		// 绑定列表来自 spec(留空时 = PipelineSpe::DefaultFrameBindings(),即 binding 0 的相机 UBO)。
+		// 这里不写死:以后加纹理/材质参数,只需要在 spec.Bindings 里多一项。
+		const std::vector<DescriptorBinding> bindings = m_Spec.GetBindings();
+		VULCANITE_CORE_ASSERT(!bindings.empty(), "PipelineSpe::Bindings 不能为空!");
+
+		std::vector<VkDescriptorSetLayoutBinding> vkBindings;
+		vkBindings.reserve(bindings.size());
+		for (const DescriptorBinding& binding : bindings) {
+			VkDescriptorSetLayoutBinding vkBinding{};
+			vkBinding.binding = binding.Binding;
+			vkBinding.descriptorCount = binding.Count;
+			vkBinding.descriptorType = ToVkDescriptorType(binding.Type);
+			vkBinding.pImmutableSamplers = nullptr;
+			vkBinding.stageFlags = ToVkShaderStage(binding.Stages);
+			vkBindings.push_back(vkBinding);
+		}
 
 		VkDescriptorSetLayoutCreateInfo layoutInfo{};
 		layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-		layoutInfo.bindingCount = 1;
-		layoutInfo.pBindings = &uboLayoutBinding;
+		layoutInfo.bindingCount = static_cast<uint32_t>(vkBindings.size());
+		layoutInfo.pBindings = vkBindings.data();
 
 		VkResult result = vkCreateDescriptorSetLayout(m_Device, &layoutInfo, nullptr, &m_DescriptorSetLayout);
 		VULCANITE_CORE_ASSERT(result == VK_SUCCESS, "failed to create descriptor set layout!");
@@ -373,6 +397,12 @@ namespace Vulcanite {
 		if (m_Device == VK_NULL_HANDLE) {
 			return;
 		}
+
+		// 管线可能仍被"已提交但尚未执行完"的命令缓冲引用 —— 例如上层某个 Ref<Pipeline>
+		// 在设备空闲之前析构(图层先于窗口销毁就会这样)。此时直接销毁会触发
+		// VUID-vkDestroyPipeline-pipeline-00765,所以这里保守地等设备空闲。
+		// 管线销毁只发生在初始化 / 重建 / 退出时,这次停顿的代价可以接受。
+		vkDeviceWaitIdle(m_Device);
 
 		if (m_GraphicsPipeline != VK_NULL_HANDLE) {
 			vkDestroyPipeline(m_Device, m_GraphicsPipeline, nullptr);

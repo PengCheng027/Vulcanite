@@ -11,6 +11,7 @@
 
 #include "Core/Base.h"
 
+#include "Renderer/DrawCommand.h"
 #include "Renderer/GraphicsContext.h"
 
 namespace Vulcanite {
@@ -30,17 +31,24 @@ namespace Vulcanite {
 
 		void* GetWindowHandle() const override;
 
-		// ===== 动态批缓冲接口(CPU 每帧写入几何数据,host-visible 常驻映射) =====
-		// 上传本帧收集到的顶点/索引数据(字节级接口,避免头文件暴露顶点类型)
-		// 返回 false 表示超出容量(数据未写入)
-		bool UploadDynamicGeometry(const void* vertexData, VkDeviceSize vertexBytes,
-			const void* indexData, VkDeviceSize indexBytes);
+		// ===== 动态批缓冲:追加写入 =====
+		// 一次绘制一份几何,同一帧的多条绘制依次追加到同一份缓冲。
+		// 顶点用**字节偏移**定位(不假设 stride),因此不同顶点布局可以共存;
+		// outVertexByteOffset / outFirstIndex 供 vkCmdBindVertexBuffers 与 vkCmdDrawIndexed 使用。
+		// 返回 false 表示容量不足(本次未写入)。
+		bool AppendDynamicGeometry(const void* vertexData, VkDeviceSize vertexBytes,
+			const void* indexData, VkDeviceSize indexBytes,
+			uint32_t& outVertexByteOffset, uint32_t& outFirstIndex);
 
 		void SetUniBufferObject(const UniformBufferObject& uniBufferObject);
 
+		// ===== 绘制命令列表:上层填充,RecordCommandBuffer 逐条执行 =====
+		void PushDrawCommand(const DrawCommand& command);
+		void ClearDrawCommands();
+		const std::vector<DrawCommand>& GetDrawCommands() const;
+
 		VkBuffer GetDynamicVertexBuffer() const;
 		VkBuffer GetDynamicIndexBuffer() const;
-		uint32_t GetDynamicIndexCount() const;
 
 		VkDevice GetDevice() const;
 		VkRenderPass GetRenderPass() const;
@@ -86,7 +94,9 @@ namespace Vulcanite {
 		void CreateImageViews();
 		void CreateRenderPass();
 
-		void CreatePipeline();
+		// 帧级描述符布局(binding 0 = 相机 UBO):由上下文拥有,与管线解耦。
+		// 必须与 PipelineSpe::DefaultFrameBindings() 定义一致,两者才能共用同一份描述符集。
+		void CreateFrameDescriptorSetLayout();
 
 		void CreateCommandPool();
 
@@ -144,10 +154,9 @@ namespace Vulcanite {
 
 		VkRenderPass m_RenderPass;
 
-		// 管线(着色器 + 顶点布局 + 固定功能状态 + 描述符布局)由 VulkanPipeline 拥有。
-		// 这是平台层内部,直接持有具体类型:拿 descriptor set layout / 绑描述符集都不必转型。
-		// (平台无关的 Pipeline 接口只给 Renderer/RenderCommand 那一侧用。)
-		Ref<VulkanPipeline> m_Pipeline;
+		// 帧级描述符布局:管线只是"引用"同一定义的布局,这里由上下文拥有,
+		// 因此管线可以从上下文里挪走(现在由 Renderer2D 创建并持有)。
+		VkDescriptorSetLayout m_FrameDescriptorSetLayout = VK_NULL_HANDLE;
 
 		VkCommandPool m_CommandPool;
 
@@ -168,6 +177,7 @@ namespace Vulcanite {
 		std::vector<VkFence> m_ImagesFlight;
 
 		// ===== 动态批缓冲(每帧一份, host-visible + 常驻映射, CPU 直接 memcpy) =====
+		// 顶点缓冲按"字节竞技场"使用:不假设 stride,任何顶点布局的几何都能依次追加。
 		std::vector<VkBuffer> m_DynamicVertexBuffers;
 		std::vector<VkDeviceMemory> m_DynamicVertexMemory;
 		std::vector<void*> m_DynamicVertexMapped;
@@ -176,13 +186,17 @@ namespace Vulcanite {
 		std::vector<VkDeviceMemory> m_DynamicIndexMemory;
 		std::vector<void*> m_DynamicIndexMapped;
 
-		std::vector<uint32_t> m_DynamicIndexCounts;   // 每帧实际写入的索引数
+		std::vector<uint32_t> m_DynamicVertexBytesUsed;   // 每帧已写入的顶点字节数
+		std::vector<uint32_t> m_DynamicIndexCounts;       // 每帧已写入的索引数
 
 		VkDeviceSize m_DynamicVertexCapacityBytes = 0;
 		VkDeviceSize m_DynamicIndexCapacityBytes = 0;
 
-		// 容量按 Renderer2D 目标(MaxQuads = 20000,每 quad 4 顶点 6 索引)留足余量
-		static constexpr uint32_t MAX_DYNAMIC_VERTICES = 100000;
+		// 本帧的绘制命令列表:Begin 时清空,RecordCommandBuffer 遍历执行
+		std::vector<DrawCommand> m_DrawCommands;
+
+		// 容量按字节计:4 MB 顶点足以容纳约 20 万个 20 字节顶点(远超当前需求)
+		static constexpr uint32_t MAX_DYNAMIC_VERTEX_BYTES = 4 * 1024 * 1024;
 		static constexpr uint32_t MAX_DYNAMIC_INDICES = 150000;
 
 		int m_CurrentFrame = 0;

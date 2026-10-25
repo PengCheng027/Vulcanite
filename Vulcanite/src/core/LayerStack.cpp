@@ -10,6 +10,7 @@ namespace Vulcanite {
 	LayerStack::~LayerStack() {
 
 		for (Layer* layer : m_Layers) {
+			layer->OnDetach();   // 让图层在销毁前释放自己持有的渲染资源
 			delete layer;
 		}
 	}

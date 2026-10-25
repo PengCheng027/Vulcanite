@@ -11,7 +11,7 @@ namespace Vulcanite {
 		s_RendererAPI->Begin(viewProj);
 	}
 
-	void RenderCommand::DrawIndex(const Mesh& mesh) {
-		s_RendererAPI->DrawIndex(mesh);
+	void RenderCommand::DrawIndex(const Mesh& mesh, const Ref<Pipeline>& pipeline) {
+		s_RendererAPI->DrawIndex(mesh, pipeline);
 	}
 }

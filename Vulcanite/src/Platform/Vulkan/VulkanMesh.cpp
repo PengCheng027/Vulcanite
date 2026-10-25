@@ -66,6 +66,44 @@ namespace Vulcanite {
 		m_VertexCount = vertexCount;   // 同步实际数量
 	}
 
+	uint32_t VulkanMesh::GetVertexCapacity() const {
+		return static_cast<uint32_t>(m_Vertices.size());
+	}
+
+	uint32_t VulkanMesh::GetIndexCapacity() const {
+		return static_cast<uint32_t>(m_Indices.size());
+	}
+
+	uint32_t VulkanMesh::AppendVertex(const Vertex& vertex) {
+		if (m_VertexCount >= m_Vertices.size()) {
+			VULCANITE_CORE_ASSERT(false, "vertex data exceeds mesh capacity!");
+			return 0;
+		}
+
+		m_Vertices[m_VertexCount] = vertex;
+		m_VertexCount++;
+		return m_VertexCount;
+	}
+
+	bool VulkanMesh::AppendIndices(const uint32_t* indices, uint32_t indexCount) {
+		if (indices == nullptr || indexCount == 0) {
+			return false;
+		}
+		if (static_cast<size_t>(m_IndexCount) + indexCount > m_Indices.size()) {
+			VULCANITE_CORE_ASSERT(false, "index data exceeds mesh capacity!");
+			return false;
+		}
+
+		memcpy(m_Indices.data() + m_IndexCount, indices, indexCount * sizeof(uint32_t));
+		m_IndexCount += indexCount;
+		return true;
+	}
+
+	void VulkanMesh::ResetGeometry() {
+		m_VertexCount = 0;
+		m_IndexCount = 0;
+	}
+
 	VkVertexInputBindingDescription VulkanMesh::GetBindingDescription() {
 		VkVertexInputBindingDescription bindingDescription{};
 		bindingDescription.binding = 0;
