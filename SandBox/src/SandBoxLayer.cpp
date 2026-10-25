@@ -72,7 +72,8 @@ namespace Vulcanite {
 		posOnlySpec.VertexShaderPath = "assets/spir_v/shader_posonly.vert.spv";
 		posOnlySpec.FragmentShaderPath = "assets/spir_v/shader_posonly.frag.spv";
 		posOnlySpec.Layout = BufferLayout{
-			VertexAttribute(ShaderDataType::Float2, "m_Pos")
+			VertexAttribute(ShaderDataType::Float2, "m_Pos"),
+			VertexAttribute(ShaderDataType::Float3, "m_Color")
 		};
 		posOnlySpec.Topology = PrimitiveTopology::LineList;
 		posOnlySpec.SampleCount = 1;
@@ -102,9 +103,7 @@ namespace Vulcanite {
 
 		Renderer2D::BeginSence(viewProject);
 
-		// 先画折线/曲线:它们和下面的 quad 落在同一个批里(同管线、同布局、同一次绘制)
 		DrawDemoPolylines();
-
 		// quad 默认是 1×1 世界单位,而网格间距只有 0.09:
 		// 缩小到 0.08×0.08,让 400 个矩形彼此分开(否则会糊成一片)
 		glm::mat4 transform = glm::scale(glm::mat4(1.0f), glm::vec3(0.08f));
@@ -113,10 +112,10 @@ namespace Vulcanite {
 		// 正交可见范围:x ∈ [-1.78, 1.78], y ∈ [-1, 1]
 		for (int x = 0; x < 20; x++) {
 			for (int y = 0; y < 20; y++) {
-				// 第 10 列起换用第二条管线:Renderer2D 会在切换处先结算当前批,
-				// 于是本帧变成两条绘制命令(左右两半各一条)。
+				// 第 10 列起换用第二条管线:Renderer2D 只结算"四边形批",
+				// 折线批完全不受影响(两条批各有自己的存储和管线)。
 				if (x == 10) {
-					Renderer2D::SetPipeline(m_AltPipeline);
+					Renderer2D::SetQuadPipeline(m_AltPipeline);
 				}
 
 				float fx = -0.9f + x * 0.09f;
@@ -129,6 +128,9 @@ namespace Vulcanite {
 			}
 		}
 
+		// 先画折线/曲线:它们和下面的 quad 落在同一个批里(同管线、同布局、同一次绘制)
+		
+		
 		Renderer2D::EndSence();
 
 		// ===== 演示二:用"不同顶点布局"的管线画一个三角形 =====
@@ -138,10 +140,16 @@ namespace Vulcanite {
 	}
 
 	void SandBoxLayer::DrawDemoPolylines() {
-		// ===== 演示:折线 / 曲线轮廓进入 Renderer2D 的批 =====
-		// 内部按"有宽度的三角形条带"展开,和 quad 共用同一个批/管线/一次 draw call。
+		// ===== 验证 LineList 拓扑是否真的生效 =====
+		// 折线批默认用"三角形展开"的默认管线(TriangleList)。这里把折线批换成
+		// posOnly 管线(它的 Topology = LineList):
+		//   - 若拓扑真的生效:折线会从"有宽度的三角形条带"变成 1px 硬件细线;
+		//   - 颜色也会变成该管线片元着色器写死的橙色(说明确实换了管线)。
+		Renderer2D::SetLinePipeline(m_PosOnlyPipeline);
 
-		// 1) 闭合折线:三角形轮廓(3 个点 → 3 段 → 18 个索引)
+		// 注意:LineList 模式下 width 会被忽略(硬件线宽固定 1px)。
+
+		// 1) 闭合折线:三角形轮廓(3 个点 → 3 段 → 6 个索引)
 		const glm::vec3 triangle[3] = {
 			{ -1.60f,  0.30f, 0.0f },
 			{ -1.10f,  0.30f, 0.0f },
