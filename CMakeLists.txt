@@ -130,7 +130,21 @@ target_link_libraries(Vulcanite PUBLIC spdlog::spdlog glfw Vulkan::Vulkan)
 target_include_directories(Vulcanite PUBLIC
     ${CMAKE_SOURCE_DIR}/Vulcanite/src
     ${CMAKE_SOURCE_DIR}/Vendor/glm
+    ${CMAKE_SOURCE_DIR}/Vendor/stb
 )
+
+# ===== 第三方单头文件库:stb(header-only)=====
+# 头文件不参与编译;只把它列进 target_sources 是为了在 VS 解决方案资源管理器里可见,
+# 方便点开查看。真正的实现由 Vulcanite/src/Utils/StbImage.cpp 里的
+# STB_IMAGE_IMPLEMENTATION 生成(只能在一个 .cpp 里定义,否则重复符号)。
+set(VULCANITE_VENDOR_HEADERS
+    ${CMAKE_SOURCE_DIR}/Vendor/stb/stb_image.h
+)
+if(EXISTS ${CMAKE_SOURCE_DIR}/Vendor/stb/stb_image_write.h)
+    list(APPEND VULCANITE_VENDOR_HEADERS ${CMAKE_SOURCE_DIR}/Vendor/stb/stb_image_write.h)
+endif()
+source_group(TREE ${CMAKE_SOURCE_DIR}/Vendor/stb PREFIX "Vendor" FILES ${VULCANITE_VENDOR_HEADERS})
+target_sources(Vulcanite PRIVATE ${VULCANITE_VENDOR_HEADERS})
 
 # ============================================================================
 #  示例应用 (SandBox) —— 引擎的使用者
@@ -164,6 +178,16 @@ add_custom_command(TARGET SandBox POST_BUILD
     $<TARGET_FILE_DIR:SandBox>/assets/spir_v
     COMMENT "Copying spir_v to SandBox output directory"
 )
+
+# ===== 构建后把 textures 复制到 exe 旁边(运行时用相对路径 assets/textures/... 读取)=====
+if(EXISTS ${CMAKE_SOURCE_DIR}/Vulcanite/assets/textures)
+    add_custom_command(TARGET SandBox POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+        ${CMAKE_SOURCE_DIR}/Vulcanite/assets/textures
+        $<TARGET_FILE_DIR:SandBox>/assets/textures
+        COMMENT "Copying textures to SandBox output directory"
+    )
+endif()
 
 # ===== VS 调试时工作目录设为 exe 所在目录(相对路径 assets/... 直接命中) =====
 set_target_properties(SandBox PROPERTIES
